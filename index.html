@@ -86,9 +86,9 @@
     <!-- JavaScript Logic -->
     <script>
         // **********************************************************
-        // นำ URL ที่ได้จากการ Deploy Google Apps Script มาวางตรงนี้
+        // [สำคัญ] นำ URL ที่ได้จากการ Deploy Google Apps Script มาวางตรงนี้
         // **********************************************************
-        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyWGDVbFbGrlcV549PVletNePn5FboJKOUe5iUxeFYKsEj1n_HfMghvmO1jyToykLePvw/exec"; 
+        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyDX7r6XDa-1PYOU6xxewbp3fRFk_IwjfMO8G_u624ea-25rA1-YY1Rt4EkLHVGGPBLEQ/exec"; // <-- วาง URL ภายในเครื่องหมายคำพูด เช่น "https://script.google.com/..."
 
         // --- Data Constants ---
         const DEFAULT_LOCATIONS = [
@@ -119,7 +119,7 @@
                 view: 'dashboard', 
                 reports: [],
                 students: [],
-                config: { locations: [], trashTypes: [], classLevels: [] },
+                config: { locations: [], trashTypes: [], classLevels: [], scriptUrl: "" },
                 isMobileMenuOpen: false,
                 chartInstances: [],
                 editingReportId: null
@@ -136,8 +136,14 @@
                 this.state.config = savedConfig ? JSON.parse(savedConfig) : {
                     locations: [...DEFAULT_LOCATIONS],
                     trashTypes: [...DEFAULT_TRASH_TYPES],
-                    classLevels: [...DEFAULT_CLASS_LEVELS]
+                    classLevels: [...DEFAULT_CLASS_LEVELS],
+                    scriptUrl: ""
                 };
+                
+                // [FIX] ถ้าใน Config ไม่มี URL แต่ในโค้ดมี (GOOGLE_SCRIPT_URL) ให้ใช้จากโค้ด
+                if (!this.state.config.scriptUrl && GOOGLE_SCRIPT_URL) {
+                    this.state.config.scriptUrl = GOOGLE_SCRIPT_URL;
+                }
 
                 this.render();
             },
@@ -152,10 +158,11 @@
 
             // --- Google Sheets Sync Logic ---
             async syncStudentsToCloud() {
-                if (!GOOGLE_SCRIPT_URL) return;
+                const url = this.state.config.scriptUrl;
+                if (!url) return;
                 try {
                     // Send students list to Google Sheet (Action: sync_students)
-                    await fetch(GOOGLE_SCRIPT_URL, {
+                    await fetch(url, {
                         method: 'POST',
                         mode: 'no-cors',
                         headers: { 'Content-Type': 'application/json' },
@@ -237,9 +244,10 @@
                     this.saveData();
                     
                     // Send Report to Google Sheets
-                    if (GOOGLE_SCRIPT_URL) {
+                    const url = this.state.config.scriptUrl;
+                    if (url) {
                         try {
-                            await fetch(GOOGLE_SCRIPT_URL, {
+                            await fetch(url, {
                                 method: 'POST',
                                 mode: 'no-cors',
                                 headers: { 'Content-Type': 'application/json' },
@@ -264,12 +272,35 @@
                 this.state.editingReportId = null;
                 this.setView('search');
             },
-            deleteReport(id) {
-                if(confirm('คุณต้องการลบรายการนี้ใช่หรือไม่?')) {
+            async deleteReport(id) {
+                if(confirm('คุณต้องการลบรายการนี้ออกจากระบบ (ทั้งในเครื่องและ Google Sheet) ใช่หรือไม่?')) {
+                    // 1. ลบจากในเครื่อง (Local)
                     this.state.reports = this.state.reports.filter(r => r.id !== id);
                     this.saveData();
                     this.render();
-                    this.showNotification('ลบรายการเรียบร้อย');
+                    
+                    // 2. ลบจาก Google Sheet (Cloud)
+                    const url = this.state.config.scriptUrl;
+                    if (url) {
+                        try {
+                            this.showNotification("กำลังลบข้อมูลจาก Google Sheet...");
+                            await fetch(url, {
+                                method: 'POST',
+                                mode: 'no-cors',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ 
+                                    action: 'delete_report', 
+                                    id: id 
+                                })
+                            });
+                            this.showNotification('ลบรายการเรียบร้อยแล้ว');
+                        } catch (error) {
+                            console.error("Error deleting from cloud:", error);
+                            this.showNotification('ลบในเครื่องสำเร็จ แต่ลบจาก Cloud ไม่สำเร็จ');
+                        }
+                    } else {
+                        this.showNotification('ลบรายการในเครื่องเรียบร้อย');
+                    }
                 }
             },
 
@@ -385,7 +416,7 @@
                     case 'awards': main.innerHTML = this.getAwardsHTML(); break;
                     case 'executive': main.innerHTML = this.getExecutiveHTML(); break;
                     case 'students': main.innerHTML = this.getStudentManagerHTML(); this.attachStudentListeners(); break;
-                    case 'settings': main.innerHTML = this.getSettingsHTML(); break;
+                    case 'settings': main.innerHTML = this.getSettingsHTML(); this.attachSettingsListeners(); break;
                 }
                 lucide.createIcons();
                 setTimeout(() => this.renderCharts(), 0);
@@ -397,10 +428,13 @@
                 this.state.reports.forEach(r => locCounts[r.location] = (locCounts[r.location] || 0) + 1);
                 const topLocs = Object.entries(locCounts).sort((a,b) => b[1]-a[1]).slice(0,3);
                 const renderList = (items) => items.length === 0 ? `<li class="text-sm text-gray-400">ยังไม่มีข้อมูล</li>` : items.map(([name, count], idx) => `<li class="flex justify-between items-center py-2 border-b last:border-0 border-gray-100"><span class="text-gray-700 text-sm"><span class="font-bold mr-2 text-emerald-600">#${idx+1}</span> ${name}</span><span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-xs font-bold">${count}</span></li>`).join('');
-                return `<div class="space-y-6 animate-fade-in"><div class="grid grid-cols-1 md:grid-cols-2 gap-4"><div class="bg-gradient-to-br from-emerald-600 to-teal-700 text-white p-6 rounded-2xl shadow-lg relative overflow-hidden"><div class="relative z-10"><h3 class="text-emerald-100 text-sm font-medium mb-1">สถิติการแจ้งเหตุรวม</h3><p class="text-5xl font-bold tracking-tight">${total}</p><p class="text-sm mt-2 opacity-80">ครั้งในภาคเรียนนี้</p></div><i data-lucide="bar-chart-2" class="absolute right-0 bottom-0 text-emerald-500 opacity-20 w-32 h-32 -mr-6 -mb-6"></i></div><div class="bg-white p-6 rounded-2xl shadow-md border border-gray-100"><h3 class="text-gray-800 font-bold mb-4 flex items-center"><i data-lucide="alert-triangle" class="w-5 h-5 mr-2 text-orange-500"></i> จุดที่พบขยะบ่อยที่สุด</h3><ul>${renderList(topLocs)}</ul></div></div></div>`;
+                const recentRows = this.state.reports.slice(0, 5).map(r => `<tr class="hover:bg-gray-50 border-b last:border-0 transition-colors"><td class="p-3 text-gray-500 text-xs">${new Date(r.timestamp).toLocaleDateString('th-TH')}</td><td class="p-3 text-gray-800 text-sm font-medium">${r.location}</td><td class="p-3 text-gray-600 text-sm">${r.trashType}</td><td class="p-3"><span class="bg-emerald-100 text-emerald-800 px-2 py-1 rounded-full text-xs font-bold">${r.classLevel}</span></td></tr>`).join('');
+                return `<div class="space-y-6 animate-fade-in"><div class="grid grid-cols-1 md:grid-cols-2 gap-4"><div class="bg-gradient-to-br from-emerald-600 to-teal-700 text-white p-6 rounded-2xl shadow-lg relative overflow-hidden"><div class="relative z-10"><h3 class="text-emerald-100 text-sm font-medium mb-1">สถิติการแจ้งเหตุรวม</h3><p class="text-5xl font-bold tracking-tight">${total}</p><p class="text-sm mt-2 opacity-80">ครั้งในภาคเรียนนี้</p></div><i data-lucide="bar-chart-2" class="absolute right-0 bottom-0 text-emerald-500 opacity-20 w-32 h-32 -mr-6 -mb-6"></i></div><div class="bg-white p-6 rounded-2xl shadow-md border border-gray-100"><h3 class="text-gray-800 font-bold mb-4 flex items-center"><i data-lucide="alert-triangle" class="w-5 h-5 mr-2 text-orange-500"></i> จุดที่พบขยะบ่อยที่สุด</h3><ul>${renderList(topLocs)}</ul></div></div><div class="bg-white p-6 rounded-2xl shadow-md overflow-hidden border border-gray-100"><h3 class="font-bold text-gray-800 mb-4 flex items-center"><i data-lucide="clock" class="w-5 h-5 mr-2 text-blue-500"></i> รายการล่าสุด</h3><div class="overflow-x-auto"><table class="w-full text-left"><thead class="bg-gray-50 text-gray-600 font-medium border-b"><tr><th class="p-3 text-sm">เวลา</th><th class="p-3 text-sm">จุดที่พบ</th><th class="p-3 text-sm">ประเภท</th><th class="p-3 text-sm">ชั้น</th></tr></thead><tbody class="divide-y text-sm">${recentRows || '<tr><td colspan="4" class="p-4 text-center text-gray-400">ยังไม่มีข้อมูล</td></tr>'}</tbody></table></div></div></div>`;
             },
 
             getReportFormHTML() {
+                const url = this.state.config.scriptUrl;
+                const warningMsg = !url ? `<div class="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-4 text-sm rounded shadow-sm flex justify-between items-center"><div><p class="font-bold">⚠️ ยังไม่ได้เชื่อมต่อ Google Sheets</p><p>ข้อมูลจะถูกบันทึกแค่ในเครื่องนี้เท่านั้น</p></div><button onclick="app.setView('settings')" class="text-yellow-700 underline text-xs font-bold">ไปตั้งค่า</button></div>` : '';
                 const options = (arr, selected) => arr.map(i => `<option value="${i}" ${i === selected ? 'selected' : ''}>${i}</option>`).join('');
                 const isEditing = !!this.state.editingReportId;
                 const editingReport = isEditing ? this.state.reports.find(r => r.id === this.state.editingReportId) : null;
@@ -412,6 +446,7 @@
 
                 return `
                     <div class="max-w-2xl mx-auto animate-fade-in pb-12">
+                        ${warningMsg}
                         <h2 class="text-2xl font-bold text-gray-800 mb-6 flex items-center"><i data-lucide="${isEditing ? 'edit' : 'plus-circle'}" class="mr-3 text-emerald-600 w-8 h-8"></i> ${isEditing ? 'แก้ไขการแจ้งเหตุ' : 'บันทึกการแจ้งเหตุ'}</h2>
                         <form id="report-form" class="bg-white p-6 rounded-2xl shadow-lg space-y-5 border border-gray-100">
                             <div class="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
@@ -528,7 +563,47 @@
             getSettingsHTML() {
                 const renderList = (items, type) => items.map((item, idx) => `<div class="flex justify-between items-center p-2 hover:bg-gray-50 border-b last:border-0 border-gray-100"><span class="text-sm text-gray-700">${item}</span><button onclick="app.removeConfigItem('${type}', ${idx})" class="text-gray-400 hover:text-red-500"><i data-lucide="x" class="w-4 h-4"></i></button></div>`).join('');
                 const renderCard = (title, icon, type, items, placeholder) => `<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden"><div class="bg-gray-50 px-4 py-3 border-b border-gray-200 flex justify-between items-center"><h3 class="font-bold text-gray-700 flex items-center text-sm"><i data-lucide="${icon}" class="w-4 h-4 mr-2"></i>${title}</h3><button onclick="app.resetConfig('${type}')" class="text-xs text-blue-500 hover:text-blue-700 underline">รีเซ็ต</button></div><div class="max-h-60 overflow-y-auto">${renderList(items, type)}</div><div class="p-3 border-t border-gray-100"><form onsubmit="event.preventDefault(); app.addConfigItem('${type}', this.elements[0].value); this.reset();" class="flex gap-2"><input type="text" placeholder="${placeholder}" required class="flex-1 p-2 text-sm border rounded focus:ring-2 focus:ring-emerald-500 focus:outline-none"><button type="submit" class="bg-emerald-600 text-white px-3 rounded hover:bg-emerald-700"><i data-lucide="plus" class="w-4 h-4"></i></button></form></div></div>`;
-                return `<div class="max-w-4xl mx-auto animate-fade-in pb-12"><h2 class="text-2xl font-bold text-gray-800 mb-6 flex items-center"><i data-lucide="settings" class="mr-3 text-emerald-600 w-8 h-8"></i> ตั้งค่าตัวเลือก</h2><div class="grid grid-cols-1 md:grid-cols-3 gap-6">${renderCard('ระดับชั้น', 'users', 'classLevels', this.state.config.classLevels, 'เช่น ม.1/4')}${renderCard('จุดที่พบ', 'map-pin', 'locations', this.state.config.locations, 'เช่น หน้าห้องสมุด')}${renderCard('ประเภทขยะ', 'trash', 'trashTypes', this.state.config.trashTypes, 'เช่น โฟม')}</div></div>`;
+                const scriptUrl = this.state.config.scriptUrl || '';
+                return `
+                    <div class="max-w-4xl mx-auto animate-fade-in pb-12">
+                        <h2 class="text-2xl font-bold text-gray-800 mb-6 flex items-center">
+                            <i data-lucide="settings" class="mr-3 text-emerald-600 w-8 h-8"></i> ตั้งค่าตัวเลือก
+                        </h2>
+
+                        <!-- Connection Settings -->
+                        <div class="bg-white p-6 rounded-2xl shadow-sm border border-blue-100 mb-8">
+                            <h3 class="font-bold text-gray-700 mb-4 flex items-center">
+                                <i data-lucide="link" class="mr-2 text-blue-500"></i> เชื่อมต่อ Google Sheet
+                            </h3>
+                            <p class="text-sm text-gray-500 mb-2">นำ Web App URL จาก Google Apps Script มาวางที่นี่เพื่อเปิดใช้งานการบันทึกออนไลน์</p>
+                            <form id="script-url-form" class="flex gap-2">
+                                <input type="text" name="url" value="${scriptUrl}" placeholder="https://script.google.com/macros/s/..." class="flex-1 p-3 bg-gray-50 border rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                                <button type="submit" class="bg-blue-600 text-white px-6 rounded-xl hover:bg-blue-700 font-bold">บันทึก</button>
+                            </form>
+                        </div>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            ${renderCard('ระดับชั้น', 'users', 'classLevels', this.state.config.classLevels, 'เช่น ม.1/4')}
+                            ${renderCard('จุดที่พบ', 'map-pin', 'locations', this.state.config.locations, 'เช่น หน้าห้องสมุด')}
+                            ${renderCard('ประเภทขยะ', 'trash', 'trashTypes', this.state.config.trashTypes, 'เช่น โฟม')}
+                        </div>
+                    </div>
+                `;
+            },
+
+            attachSettingsListeners() {
+                // Connection Form Listener
+                const urlForm = document.getElementById('script-url-form');
+                if (urlForm) {
+                    urlForm.addEventListener('submit', (e) => {
+                        e.preventDefault();
+                        const formData = new FormData(urlForm);
+                        const url = formData.get('url').trim();
+                        this.state.config.scriptUrl = url;
+                        this.saveData();
+                        this.showNotification('บันทึก URL เรียบร้อย');
+                    });
+                }
             },
 
             getStudentManagerHTML() {
