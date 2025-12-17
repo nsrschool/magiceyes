@@ -147,7 +147,7 @@
             },
 
             init() {
-                // Load Data from LocalStorage (โหลดข้อมูลเก่ามาแสดงก่อน เพื่อความเร็ว)
+                // Load Data from LocalStorage
                 const savedReports = localStorage.getItem('magicEyeReports');
                 this.state.reports = savedReports ? JSON.parse(savedReports) : INITIAL_REPORTS;
 
@@ -172,26 +172,48 @@
                 // Initialize Lucide Icons
                 lucide.createIcons();
 
-                // [NEW] ดึงข้อมูลล่าสุดจาก Cloud ทันทีที่เปิดแอพ
+                // Sync from Cloud
                 this.syncFromCloud();
             },
 
-            // Helper to format Date to Thai Buddhist Era
-            formatThaiDate(isoString, options = {}) {
+            // [FIXED] Manual Format to prevent double addition of BE year (3111)
+            formatThaiDate(isoString, type = 'short') {
                 if (!isoString) return '-';
-                try {
-                    const date = new Date(isoString);
-                    // Force Buddhist calendar if supported, otherwise it might fallback
-                    return date.toLocaleDateString('th-TH', {
-                        ...options,
-                        calendar: 'buddhist'
-                    });
-                } catch (e) {
-                    return isoString;
+                const date = new Date(isoString);
+                
+                const day = date.getDate();
+                const year = date.getFullYear() + 543;
+                
+                if (type === 'full') {
+                    const months = [
+                        "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+                        "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"
+                    ];
+                    const days = [
+                        "วันอาทิตย์", "วันจันทร์", "วันอังคาร", "วันพุธ", "วันพฤหัสบดี", "วันศุกร์", "วันเสาร์"
+                    ];
+                    const month = months[date.getMonth()];
+                    const dayName = days[date.getDay()];
+                    return `${dayName}ที่ ${day} ${month} พ.ศ. ${year}`;
+                } else if (type === 'short-no-year') {
+                     const months = [
+                        "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
+                        "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."
+                    ];
+                    const month = months[date.getMonth()];
+                    return `${day} ${month}`;
+                } else {
+                    // short default
+                    const months = [
+                        "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
+                        "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."
+                    ];
+                    const month = months[date.getMonth()];
+                    return `${day} ${month} ${year.toString().slice(2)}`;
                 }
             },
 
-            // [NEW] ฟังก์ชันดึงข้อมูลจาก Google Sheet มาทับข้อมูลในเครื่อง
+            // [NEW] Sync from Cloud
             async syncFromCloud() {
                 const url = this.state.config.scriptUrl;
                 if (!url) return;
@@ -201,7 +223,7 @@
                 try {
                     const response = await fetch(url, {
                         method: 'POST',
-                        mode: 'cors', // เปลี่ยนเป็น cors เพื่อให้อ่าน response ได้ (ต้อง Deploy Web App เป็น "Anyone" / "ทุกคน")
+                        mode: 'cors',
                         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                         body: JSON.stringify({ action: 'get_all_data' })
                     });
@@ -209,62 +231,41 @@
                     const result = await response.json();
                     
                     if (result.result === 'success') {
-                        // อัปเดตข้อมูลในแอพด้วยข้อมูลจาก Cloud
-                        // ยึด Cloud เป็นหลัก: ถ้าใน Sheet ลบ -> ใน App ก็จะหายไป
-                        
-                        // แปลงข้อมูล Reports
                         if (result.reports) {
-                            // แปลง timestamp กลับเป็น ISO String ถ้าจำเป็น หรือใช้ format จาก Sheet
-                            this.state.reports = result.reports.map(r => ({
-                                ...r,
-                                // แปลงวันที่ถ้าจำเป็น (Google Sheet ส่งมาเป็น String)
-                                // แต่เราเก็บเป็น String อยู่แล้วใน flow นี้
-                            }));
-                            // เรียงลำดับตามเวลาใหม่สุด
+                            this.state.reports = result.reports.map(r => ({ ...r }));
                             this.state.reports.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
                         }
                         
-                        // แปลงข้อมูล Students
                         if (result.students) {
                             this.state.students = result.students;
                         }
 
-                        this.saveData(); // บันทึกลงเครื่อง
-                        this.render();   // แสดงผลใหม่
+                        this.saveData(); 
+                        this.render();   
                         console.log("Cloud sync complete.");
                     }
                 } catch (error) {
                     console.error("Cloud sync failed:", error);
-                    // ถ้า Sync ไม่ได้ (เช่น ไม่มีเน็ต) ก็จะใช้ข้อมูลเดิมใน LocalStorage ต่อไป
                 }
             },
 
-            // [UPDATED] แก้ไขปัญหา LocalStorage เต็ม (Quota Exceeded)
             saveData() {
                 try {
-                    // 1. พยายามบันทึกข้อมูลปกติ (รวมรูปภาพ Base64)
                     localStorage.setItem('magicEyeReports', JSON.stringify(this.state.reports));
                     localStorage.setItem('magicEyeStudents', JSON.stringify(this.state.students));
                     localStorage.setItem('magicEyeConfig', JSON.stringify(this.state.config));
                 } catch (e) { 
-                    console.warn("LocalStorage full, trying to strip images...");
+                    console.warn("LocalStorage full, stripping images...");
                     try {
-                        // 2. ถ้าเต็ม ให้สร้างสำเนาข้อมูลโดยตัดรูปภาพออก (เพื่อลดขนาด)
                         const reportsNoImg = this.state.reports.map(r => {
-                            const { image, ...rest } = r; // แยก image ออก
+                            const { image, ...rest } = r; 
                             return rest;
                         });
-                        
                         localStorage.setItem('magicEyeReports', JSON.stringify(reportsNoImg));
                         localStorage.setItem('magicEyeStudents', JSON.stringify(this.state.students));
                         localStorage.setItem('magicEyeConfig', JSON.stringify(this.state.config));
-                        
-                        // ไม่ Alert รบกวนผู้ใช้ แต่ Log ไว้
-                        console.log("Saved stripped data to LocalStorage successfully.");
                     } catch (e2) {
-                        // 3. ถ้ายังเต็มอีก (ซึ่งยากมากถ้าไม่มีรูป) ถึงจะแจ้งเตือน
                         console.error("Critical storage error:", e2);
-                        // แจ้งเตือนเฉพาะกรณีไม่ได้ต่อ Google Sheet เพราะถ้าต่อ Sheet ข้อมูลก็ยังปลอดภัย
                         if (!this.state.config.scriptUrl) {
                             this.showNotification("หน่วยความจำเครื่องเต็ม! ข้อมูลบางส่วนอาจไม่ถูกบันทึก");
                         }
@@ -272,7 +273,6 @@
                 }
             },
 
-            // --- Google Sheets Sync Logic ---
             async syncStudentsToCloud() {
                 const url = this.state.config.scriptUrl;
                 if (!url) return;
@@ -286,13 +286,9 @@
                             students: this.state.students
                         })
                     });
-                    console.log("Synced students to cloud");
-                } catch (error) {
-                    console.error("Sync error:", error);
-                }
+                } catch (error) { console.error("Sync error:", error); }
             },
 
-            // --- Navigation & UI ---
             setView(viewName) {
                 this.state.view = viewName;
                 if(viewName === 'report' && !this.state.editingReportId) this.state.editingReportId = null;
@@ -313,20 +309,17 @@
                 textEl.textContent = msg;
                 el.classList.remove('translate-x-full', 'opacity-0');
                 
-                // Auto hide after 3 seconds
                 if(this.notifTimeout) clearTimeout(this.notifTimeout);
                 this.notifTimeout = setTimeout(() => {
                     el.classList.add('translate-x-full', 'opacity-0');
                 }, 3000);
             },
 
-            // --- Data Manipulation ---
             async addReport(formData) {
                 const submitBtn = document.getElementById('submit-btn');
                 const btnText = document.getElementById('submit-btn-text');
                 const btnLoader = document.getElementById('submit-btn-loader');
                 
-                // UI Loading State
                 submitBtn.disabled = true;
                 submitBtn.classList.add('opacity-75', 'cursor-not-allowed');
                 btnText.textContent = 'กำลังบันทึก...';
@@ -336,7 +329,6 @@
                 let reportToSave = {};
 
                 if (!isNew) {
-                    // Edit existing report
                     const idx = this.state.reports.findIndex(r => r.id === this.state.editingReportId);
                     if (idx !== -1) {
                         this.state.reports[idx] = { ...this.state.reports[idx], ...formData };
@@ -345,33 +337,22 @@
                         this.showNotification("แก้ไขข้อมูลเรียบร้อย");
                     }
                 } else {
-                    // Create new report
                     reportToSave = { ...formData, id: Date.now(), timestamp: new Date().toISOString() };
                     
-                    // Logic: Points calculation
-                    // Reporter gets +1
                     if (formData.reporterName) {
                         const rIdx = this.state.students.findIndex(s => s.name === formData.reporterName);
-                        if (rIdx !== -1) {
-                            this.state.students[rIdx].points = (parseInt(this.state.students[rIdx].points) || 0) + 1;
-                        }
+                        if (rIdx !== -1) this.state.students[rIdx].points = (parseInt(this.state.students[rIdx].points) || 0) + 1;
                     }
 
-                    // Offender gets -1
                     if (formData.name) {
                         const oIdx = this.state.students.findIndex(s => s.name === formData.name);
-                        if (oIdx !== -1) {
-                            this.state.students[oIdx].points = (parseInt(this.state.students[oIdx].points) || 0) - 1;
-                        }
+                        if (oIdx !== -1) this.state.students[oIdx].points = (parseInt(this.state.students[oIdx].points) || 0) - 1;
                     }
 
-                    // Sync updated points to cloud
                     this.syncStudentsToCloud();
-
                     this.state.reports.unshift(reportToSave);
                     this.saveData();
                     
-                    // Send Report to Google Sheets
                     const url = this.state.config.scriptUrl;
                     if (url) {
                         try {
@@ -404,12 +385,10 @@
 
             async deleteReport(id) {
                 if(confirm('คุณต้องการลบรายการนี้ออกจากระบบ (ทั้งในเครื่องและ Google Sheet) ใช่หรือไม่?')) {
-                    // 1. Local Delete
                     this.state.reports = this.state.reports.filter(r => r.id !== id);
                     this.saveData();
                     this.render();
                     
-                    // 2. Cloud Delete
                     const url = this.state.config.scriptUrl;
                     if (url) {
                         try {
@@ -418,10 +397,7 @@
                                 method: 'POST',
                                 mode: 'no-cors',
                                 headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ 
-                                    action: 'delete_report', 
-                                    id: id 
-                                })
+                                body: JSON.stringify({ action: 'delete_report', id: id })
                             });
                             this.showNotification('ลบรายการเรียบร้อยแล้ว');
                         } catch (error) {
@@ -434,7 +410,6 @@
                 }
             },
 
-            // --- Configuration Logic ---
             addConfigItem(type, value) {
                 if (!value.trim()) return;
                 this.state.config[type].push(value.trim());
@@ -458,7 +433,6 @@
                 }
             },
 
-            // --- Student Management ---
             addStudent(studentData) {
                 this.state.students.push({
                     id: studentData.id || Date.now().toString(),
@@ -494,27 +468,19 @@
                         
                         let count = 0;
                         let startIndex = 0;
-                        // ตรวจสอบแถวหัวตาราง (หาคำว่า "ชั้น" หรือ "ชื่อ" ในแถวแรก)
                         if (jsonData[0] && jsonData[0].some(cell => typeof cell === 'string' && (cell.includes('ชื่อ') || cell.includes('ชั้น')))) { 
                             startIndex = 1; 
                         }
 
                         for (let i = startIndex; i < jsonData.length; i++) {
                             const row = jsonData[i];
-                            // รูปแบบ: A=ชั้นเรียน, B=เลขที่, C=คำนำหน้า, D=ชื่อ, E=นามสกุล
-                            // Array Index: 0=A, 1=B, 2=C, 3=D, 4=E
-                            
-                            const classVal = row[0];          // คอลัมน์ A: ชั้นเรียน
-                            // const number = row[1];         // คอลัมน์ B: เลขที่ (ข้าม)
-                            const prefix = row[2] || '';      // คอลัมน์ C: คำนำหน้า
-                            const firstName = row[3];         // คอลัมน์ D: ชื่อ
-                            const lastName = row[4] || '';    // คอลัมน์ E: นามสกุล
+                            const classVal = row[0];          // A: ชั้นเรียน
+                            const prefix = row[2] || '';      // C: คำนำหน้า
+                            const firstName = row[3];         // D: ชื่อ
+                            const lastName = row[4] || '';    // E: นามสกุล
 
-                            // ตรวจสอบว่าต้องมี ชั้นเรียน และ ชื่อ เป็นอย่างน้อย
                             if (classVal && firstName) { 
-                                // รวมชื่อเต็ม: คำนำหน้า + ชื่อ + นามสกุล
                                 const fullName = `${prefix} ${firstName} ${lastName}`.trim().replace(/\s+/g, ' ');
-                                
                                 this.state.students.push({
                                     id: Date.now().toString() + i,
                                     name: fullName,
@@ -528,8 +494,6 @@
                         this.syncStudentsToCloud();
                         this.showNotification(`นำเข้าสำเร็จ ${count} รายชื่อ`);
                         this.render();
-                        
-                        // รีเซ็ตช่องเลือกไฟล์
                         e.target.value = '';
                     } catch (err) { alert("เกิดข้อผิดพลาดในการอ่านไฟล์ Excel: " + err.message); }
                 };
@@ -545,22 +509,11 @@
                 });
             },
 
-            // --- Rendering Views ---
             render() {
                 const main = document.getElementById('main-content');
                 main.innerHTML = ''; 
-                
-                // Cleanup old charts
                 this.state.chartInstances.forEach(chart => chart.destroy());
                 this.state.chartInstances = [];
-
-                // Update Active Nav State (Desktop)
-                document.querySelectorAll('.nav-btn').forEach(btn => {
-                    btn.classList.remove('bg-white/20', 'shadow-sm');
-                    if(btn.textContent.trim().includes(this.getViewTitle(this.state.view))) {
-                       // btn.classList.add('bg-white/20', 'shadow-sm');
-                    }
-                });
 
                 switch (this.state.view) {
                     case 'dashboard': main.innerHTML = this.getDashboardHTML(); break;
@@ -577,10 +530,7 @@
             },
 
             getViewTitle(view) {
-                const map = {
-                    'dashboard': 'หน้าหลัก', 'report': 'แจ้งเหตุ', 'search': 'รายการ', 
-                    'awards': 'เกียรติยศ', 'students': 'รายชื่อ', 'executive': 'ผู้บริหาร', 'settings': 'ตั้งค่า'
-                };
+                const map = { 'dashboard': 'หน้าหลัก', 'report': 'แจ้งเหตุ', 'search': 'รายการ', 'awards': 'เกียรติยศ', 'students': 'รายชื่อ', 'executive': 'ผู้บริหาร', 'settings': 'ตั้งค่า' };
                 return map[view] || '';
             },
 
@@ -590,900 +540,141 @@
                 this.state.reports.forEach(r => locCounts[r.location] = (locCounts[r.location] || 0) + 1);
                 const topLocs = Object.entries(locCounts).sort((a,b) => b[1]-a[1]).slice(0,3);
                 
-                const renderList = (items) => items.length === 0 ? 
-                    `<li class="text-sm text-gray-400 py-2 text-center">ยังไม่มีข้อมูล</li>` : 
-                    items.map(([name, count], idx) => `
-                        <li class="flex justify-between items-center py-3 border-b last:border-0 border-gray-100">
-                            <span class="text-gray-700 text-sm flex items-center">
-                                <span class="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 font-bold text-xs mr-3">${idx+1}</span> 
-                                ${name}
-                            </span>
-                            <span class="bg-gray-100 text-gray-600 px-2.5 py-1 rounded-md text-xs font-bold">${count} ครั้ง</span>
-                        </li>`).join('');
-                
-                const recentRows = this.state.reports.slice(0, 5).map(r => `
-                    <tr class="hover:bg-gray-50 border-b last:border-0 transition-colors">
-                        <td class="p-4 text-gray-500 text-xs whitespace-nowrap">${this.formatThaiDate(r.timestamp, {day: 'numeric', month: 'short', year: '2-digit'})}</td>
-                        <td class="p-4 text-gray-800 text-sm font-medium">${r.location}</td>
-                        <td class="p-4 text-gray-600 text-sm">${r.trashType}</td>
-                        <td class="p-4"><span class="bg-emerald-100 text-emerald-800 px-2 py-1 rounded-full text-xs font-bold">${r.classLevel}</span></td>
-                    </tr>`).join('');
+                const renderList = (items) => items.length === 0 ? `<li class="text-sm text-gray-400 py-2 text-center">ยังไม่มีข้อมูล</li>` : items.map(([name, count], idx) => `<li class="flex justify-between items-center py-3 border-b last:border-0 border-gray-100"><span class="text-gray-700 text-sm flex items-center"><span class="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 font-bold text-xs mr-3">${idx+1}</span>${name}</span><span class="bg-gray-100 text-gray-600 px-2.5 py-1 rounded-md text-xs font-bold">${count} ครั้ง</span></li>`).join('');
+                const recentRows = this.state.reports.slice(0, 5).map(r => `<tr class="hover:bg-gray-50 border-b last:border-0 transition-colors"><td class="p-4 text-gray-500 text-xs whitespace-nowrap">${this.formatThaiDate(r.timestamp, 'short')}</td><td class="p-4 text-gray-800 text-sm font-medium">${r.location}</td><td class="p-4 text-gray-600 text-sm">${r.trashType}</td><td class="p-4"><span class="bg-emerald-100 text-emerald-800 px-2 py-1 rounded-full text-xs font-bold">${r.classLevel}</span></td></tr>`).join('');
 
-                return `
-                    <div class="space-y-6 animate-fade-in">
-                        <!-- Hero Stats -->
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div class="bg-gradient-to-br from-emerald-600 to-teal-700 text-white p-6 rounded-2xl shadow-lg relative overflow-hidden group hover:shadow-xl transition-all">
-                                <div class="relative z-10">
-                                    <h3 class="text-emerald-100 text-sm font-medium mb-1">สถิติการแจ้งเหตุรวม</h3>
-                                    <div class="flex items-baseline gap-2">
-                                        <p class="text-5xl font-bold tracking-tight">${total}</p>
-                                        <span class="text-emerald-200 text-sm">ครั้ง</span>
-                                    </div>
-                                    <p class="text-sm mt-4 opacity-80 flex items-center"><i data-lucide="calendar" class="w-4 h-4 mr-1"></i> ประจำภาคเรียนนี้</p>
-                                </div>
-                                <i data-lucide="bar-chart-2" class="absolute right-0 bottom-0 text-white opacity-10 w-40 h-40 -mr-8 -mb-8 transform group-hover:scale-110 transition-transform duration-500"></i>
-                            </div>
-
-                            <div class="bg-white p-6 rounded-2xl shadow-md border border-gray-100 relative overflow-hidden">
-                                <h3 class="text-gray-800 font-bold mb-4 flex items-center">
-                                    <div class="p-2 bg-orange-100 rounded-lg mr-3"><i data-lucide="alert-triangle" class="w-5 h-5 text-orange-600"></i></div>
-                                    จุดที่พบขยะบ่อยที่สุด
-                                </h3>
-                                <ul class="relative z-10">${renderList(topLocs)}</ul>
-                            </div>
-                        </div>
-
-                        <!-- Recent Table -->
-                        <div class="bg-white rounded-2xl shadow-md overflow-hidden border border-gray-100">
-                            <div class="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
-                                <h3 class="font-bold text-gray-800 flex items-center">
-                                    <i data-lucide="clock" class="w-5 h-5 mr-2 text-blue-500"></i> รายการแจ้งเหตุล่าสุด
-                                </h3>
-                                <button onclick="app.setView('search')" class="text-xs text-blue-600 hover:text-blue-800 font-medium">ดูทั้งหมด &rarr;</button>
-                            </div>
-                            <div class="overflow-x-auto">
-                                <table class="w-full text-left">
-                                    <thead class="bg-gray-50 text-gray-600 font-medium border-b">
-                                        <tr>
-                                            <th class="p-4 text-xs uppercase tracking-wider">วันที่</th>
-                                            <th class="p-4 text-xs uppercase tracking-wider">จุดที่พบ</th>
-                                            <th class="p-4 text-xs uppercase tracking-wider">ประเภท</th>
-                                            <th class="p-4 text-xs uppercase tracking-wider">ชั้น</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="divide-y text-sm bg-white">
-                                        ${recentRows || '<tr><td colspan="4" class="p-8 text-center text-gray-400">ยังไม่มีข้อมูลการแจ้งเหตุ</td></tr>'}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>`;
+                return `<div class="space-y-6 animate-fade-in"><div class="grid grid-cols-1 md:grid-cols-2 gap-6"><div class="bg-gradient-to-br from-emerald-600 to-teal-700 text-white p-6 rounded-2xl shadow-lg relative overflow-hidden group hover:shadow-xl transition-all"><div class="relative z-10"><h3 class="text-emerald-100 text-sm font-medium mb-1">สถิติการแจ้งเหตุรวม</h3><div class="flex items-baseline gap-2"><p class="text-5xl font-bold tracking-tight">${total}</p><span class="text-emerald-200 text-sm">ครั้ง</span></div><p class="text-sm mt-4 opacity-80 flex items-center"><i data-lucide="calendar" class="w-4 h-4 mr-1"></i> ประจำภาคเรียนนี้</p></div><i data-lucide="bar-chart-2" class="absolute right-0 bottom-0 text-white opacity-10 w-40 h-40 -mr-8 -mb-8 transform group-hover:scale-110 transition-transform duration-500"></i></div><div class="bg-white p-6 rounded-2xl shadow-md border border-gray-100 relative overflow-hidden"><h3 class="text-gray-800 font-bold mb-4 flex items-center"><div class="p-2 bg-orange-100 rounded-lg mr-3"><i data-lucide="alert-triangle" class="w-5 h-5 text-orange-600"></i></div>จุดที่พบขยะบ่อยที่สุด</h3><ul class="relative z-10">${renderList(topLocs)}</ul></div></div><div class="bg-white rounded-2xl shadow-md overflow-hidden border border-gray-100"><div class="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50"><h3 class="font-bold text-gray-800 flex items-center"><i data-lucide="clock" class="w-5 h-5 mr-2 text-blue-500"></i> รายการแจ้งเหตุล่าสุด</h3><button onclick="app.setView('search')" class="text-xs text-blue-600 hover:text-blue-800 font-medium">ดูทั้งหมด &rarr;</button></div><div class="overflow-x-auto"><table class="w-full text-left"><thead class="bg-gray-50 text-gray-600 font-medium border-b"><tr><th class="p-4 text-xs uppercase tracking-wider">วันที่</th><th class="p-4 text-xs uppercase tracking-wider">จุดที่พบ</th><th class="p-4 text-xs uppercase tracking-wider">ประเภท</th><th class="p-4 text-xs uppercase tracking-wider">ชั้น</th></tr></thead><tbody class="divide-y text-sm bg-white">${recentRows || '<tr><td colspan="4" class="p-8 text-center text-gray-400">ยังไม่มีข้อมูลการแจ้งเหตุ</td></tr>'}</tbody></table></div></div></div>`;
             },
 
-            getReportFormHTML() {
+            getReportFormHTML() { /* Same as before */ return this.getReportFormHTMLTemplate(); },
+            getReportFormHTMLTemplate() {
                 const url = this.state.config.scriptUrl;
-                const warningMsg = !url ? 
-                    `<div class="bg-amber-50 border-l-4 border-amber-400 p-4 mb-6 rounded-r-lg flex items-start animate-fade-in">
-                        <i data-lucide="alert-circle" class="w-5 h-5 text-amber-500 mr-3 mt-0.5"></i>
-                        <div class="flex-1">
-                            <h4 class="text-sm font-bold text-amber-800">ยังไม่ได้เชื่อมต่อ Google Sheets</h4>
-                            <p class="text-xs text-amber-700 mt-1">ข้อมูลจะถูกบันทึกเฉพาะในเครื่องนี้ หากต้องการสำรองข้อมูลออนไลน์ โปรดไปที่เมนูตั้งค่า</p>
-                        </div>
-                        <button onclick="app.setView('settings')" class="text-amber-700 underline text-xs font-bold whitespace-nowrap ml-4">ไปตั้งค่า</button>
-                    </div>` : '';
-                
+                const warningMsg = !url ? `<div class="bg-amber-50 border-l-4 border-amber-400 p-4 mb-6 rounded-r-lg flex items-start animate-fade-in"><i data-lucide="alert-circle" class="w-5 h-5 text-amber-500 mr-3 mt-0.5"></i><div class="flex-1"><h4 class="text-sm font-bold text-amber-800">ยังไม่ได้เชื่อมต่อ Google Sheets</h4><p class="text-xs text-amber-700 mt-1">ข้อมูลจะถูกบันทึกเฉพาะในเครื่องนี้ หากต้องการสำรองข้อมูลออนไลน์ โปรดไปที่เมนูตั้งค่า</p></div><button onclick="app.setView('settings')" class="text-amber-700 underline text-xs font-bold whitespace-nowrap ml-4">ไปตั้งค่า</button></div>` : '';
                 const options = (arr, selected) => arr.map(i => `<option value="${i}" ${i === selected ? 'selected' : ''}>${i}</option>`).join('');
-                
                 const isEditing = !!this.state.editingReportId;
                 const editingReport = isEditing ? this.state.reports.find(r => r.id === this.state.editingReportId) : null;
-                
                 let reporterClass = "";
                 if (isEditing && editingReport.reporterName) {
                     const reporter = this.state.students.find(s => s.name === editingReport.reporterName);
                     if (reporter) reporterClass = reporter.classLevel;
                 }
-
-                return `
-                    <div class="max-w-2xl mx-auto animate-fade-in pb-12">
-                        ${warningMsg}
-                        <h2 class="text-2xl font-bold text-gray-800 mb-6 flex items-center">
-                            <div class="bg-emerald-100 p-2 rounded-lg mr-3">
-                                <i data-lucide="${isEditing ? 'edit' : 'plus-circle'}" class="text-emerald-600 w-6 h-6"></i>
-                            </div>
-                            ${isEditing ? 'แก้ไขการแจ้งเหตุ' : 'บันทึกการแจ้งเหตุ'}
-                        </h2>
-                        
-                        <form id="report-form" class="bg-white p-6 md:p-8 rounded-2xl shadow-lg space-y-6 border border-gray-100 relative">
-                            <!-- Section: Reporter -->
-                            <div class="bg-emerald-50/80 p-5 rounded-xl border border-emerald-100">
-                                <label class="block text-sm font-bold text-emerald-900 mb-3 flex items-center">
-                                    <i data-lucide="user-check" class="w-4 h-4 mr-2 text-emerald-600"></i> 
-                                    ผู้แจ้ง (รับ +1 คะแนนความดี)
-                                </label>
-                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    <select id="reporter-class-filter" class="w-full p-3 bg-white border border-emerald-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none transition-shadow">
-                                        <option value="">เลือกชั้น (ผู้แจ้ง)</option>
-                                        ${options(this.state.config.classLevels, reporterClass)}
-                                    </select>
-                                    <select name="reporterName" id="reporter-name-select" ${isEditing ? '' : 'disabled'} class="w-full p-3 bg-gray-50 border border-emerald-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed">
-                                        <option value="">-- เลือกชื่อผู้แจ้ง --</option>
-                                    </select>
-                                </div>
-                            </div>
-                            
-                            <hr class="border-gray-100 border-dashed">
-
-                            <!-- Section: Offender -->
-                            <div class="space-y-4">
-                                <label class="block text-sm font-bold text-gray-700 flex items-center">
-                                    <i data-lucide="user-x" class="w-4 h-4 mr-2 text-red-500"></i> ผู้ทำผิด / เจ้าของขยะ (หัก -1 คะแนน)
-                                </label>
-                                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                    <div class="sm:col-span-1">
-                                        <select name="classLevel" id="offender-class-select" required class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-                                            <option value="">ชั้นเรียน</option>
-                                            ${options(this.state.config.classLevels, isEditing ? editingReport.classLevel : '')}
-                                        </select>
-                                    </div>
-                                    <div class="sm:col-span-2">
-                                        <select name="name" id="offender-name-select" required ${isEditing ? '' : 'disabled'} class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none disabled:opacity-50">
-                                            <option value="">-- เลือกชื่อนักเรียน --</option>
-                                        </select>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Section: Details -->
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
-                                <div>
-                                    <label class="block text-sm font-semibold text-gray-700 mb-2">จุดที่พบ</label>
-                                    <select name="location" required class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-                                        <option value="">-- เลือกจุดที่พบ --</option>
-                                        ${options(this.state.config.locations, isEditing ? editingReport.location : '')}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-semibold text-gray-700 mb-2">ประเภทขยะ</label>
-                                    <select name="trashType" required class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-                                        <option value="">-- เลือกประเภทขยะ --</option>
-                                        ${options(this.state.config.trashTypes, isEditing ? editingReport.trashType : '')}
-                                    </select>
-                                </div>
-                            </div>
-
-                            <div>
-                                <label class="block text-sm font-semibold text-gray-700 mb-2">รายละเอียดเพิ่มเติม</label>
-                                <textarea name="details" rows="3" placeholder="เช่น ทิ้งแก้วน้ำไว้บนโต๊ะ, ไม่เก็บเก้าอี้..." class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none resize-none">${isEditing && editingReport.details ? editingReport.details : ''}</textarea>
-                            </div>
-
-                            <div>
-                                <label class="block text-sm font-semibold text-gray-700 mb-2">หลักฐาน (รูปถ่าย)</label>
-                                <div class="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-xl hover:bg-gray-50 transition-colors cursor-pointer relative">
-                                    <div class="space-y-1 text-center">
-                                        <i data-lucide="image" class="mx-auto h-12 w-12 text-gray-400"></i>
-                                        <div class="flex text-sm text-gray-600 justify-center">
-                                            <label for="image-input" class="relative cursor-pointer bg-white rounded-md font-medium text-emerald-600 hover:text-emerald-500 focus-within:outline-none">
-                                                <span>อัปโหลดรูปภาพ</span>
-                                                <input id="image-input" type="file" accept="image/*" class="sr-only">
-                                            </label>
-                                        </div>
-                                        <p class="text-xs text-gray-500">PNG, JPG up to 5MB</p>
-                                        <p id="file-name-display" class="text-xs text-emerald-600 font-bold mt-2"></p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="flex gap-3 pt-4">
-                                ${isEditing ? `<button type="button" onclick="app.cancelEdit()" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-3.5 rounded-xl shadow-sm transition-all">ยกเลิก</button>` : ''}
-                                <button id="submit-btn" type="submit" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3.5 rounded-xl shadow-md hover:shadow-lg transition-all flex justify-center items-center">
-                                    <i data-lucide="loader-2" id="submit-btn-loader" class="hidden animate-spin mr-2 w-5 h-5"></i>
-                                    <span id="submit-btn-text">${isEditing ? 'บันทึกการแก้ไข' : 'บันทึกข้อมูล'}</span>
-                                </button>
-                            </div>
-                        </form>
-                    </div>`;
+                return `<div class="max-w-2xl mx-auto animate-fade-in pb-12">${warningMsg}<h2 class="text-2xl font-bold text-gray-800 mb-6 flex items-center"><div class="bg-emerald-100 p-2 rounded-lg mr-3"><i data-lucide="${isEditing ? 'edit' : 'plus-circle'}" class="text-emerald-600 w-6 h-6"></i></div>${isEditing ? 'แก้ไขการแจ้งเหตุ' : 'บันทึกการแจ้งเหตุ'}</h2><form id="report-form" class="bg-white p-6 md:p-8 rounded-2xl shadow-lg space-y-6 border border-gray-100 relative"><div class="bg-emerald-50/80 p-5 rounded-xl border border-emerald-100"><label class="block text-sm font-bold text-emerald-900 mb-3 flex items-center"><i data-lucide="user-check" class="w-4 h-4 mr-2 text-emerald-600"></i> ผู้แจ้ง (รับ +1 คะแนนความดี)</label><div class="grid grid-cols-1 sm:grid-cols-2 gap-4"><select id="reporter-class-filter" class="w-full p-3 bg-white border border-emerald-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none transition-shadow"><option value="">เลือกชั้น (ผู้แจ้ง)</option>${options(this.state.config.classLevels, reporterClass)}</select><select name="reporterName" id="reporter-name-select" ${isEditing ? '' : 'disabled'} class="w-full p-3 bg-gray-50 border border-emerald-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"><option value="">-- เลือกชื่อผู้แจ้ง --</option></select></div></div><hr class="border-gray-100 border-dashed"><div class="space-y-4"><label class="block text-sm font-bold text-gray-700 flex items-center"><i data-lucide="user-x" class="w-4 h-4 mr-2 text-red-500"></i> ผู้ทำผิด / เจ้าของขยะ (หัก -1 คะแนน)</label><div class="grid grid-cols-1 sm:grid-cols-3 gap-4"><div class="sm:col-span-1"><select name="classLevel" id="offender-class-select" required class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"><option value="">ชั้นเรียน</option>${options(this.state.config.classLevels, isEditing ? editingReport.classLevel : '')}</select></div><div class="sm:col-span-2"><select name="name" id="offender-name-select" required ${isEditing ? '' : 'disabled'} class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none disabled:opacity-50"><option value="">-- เลือกชื่อนักเรียน --</option></select></div></div></div><div class="grid grid-cols-1 md:grid-cols-2 gap-5"><div><label class="block text-sm font-semibold text-gray-700 mb-2">จุดที่พบ</label><select name="location" required class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"><option value="">-- เลือกจุดที่พบ --</option>${options(this.state.config.locations, isEditing ? editingReport.location : '')}</select></div><div><label class="block text-sm font-semibold text-gray-700 mb-2">ประเภทขยะ</label><select name="trashType" required class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"><option value="">-- เลือกประเภทขยะ --</option>${options(this.state.config.trashTypes, isEditing ? editingReport.trashType : '')}</select></div></div><div><label class="block text-sm font-semibold text-gray-700 mb-2">รายละเอียดเพิ่มเติม</label><textarea name="details" rows="3" placeholder="เช่น ทิ้งแก้วน้ำไว้บนโต๊ะ, ไม่เก็บเก้าอี้..." class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none resize-none">${isEditing && editingReport.details ? editingReport.details : ''}</textarea></div><div><label class="block text-sm font-semibold text-gray-700 mb-2">หลักฐาน (รูปถ่าย)</label><div class="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-xl hover:bg-gray-50 transition-colors cursor-pointer relative"><div class="space-y-1 text-center"><i data-lucide="image" class="mx-auto h-12 w-12 text-gray-400"></i><div class="flex text-sm text-gray-600 justify-center"><label for="image-input" class="relative cursor-pointer bg-white rounded-md font-medium text-emerald-600 hover:text-emerald-500 focus-within:outline-none"><span>อัปโหลดรูปภาพ</span><input id="image-input" type="file" accept="image/*" class="sr-only"></label></div><p class="text-xs text-gray-500">PNG, JPG up to 5MB</p><p id="file-name-display" class="text-xs text-emerald-600 font-bold mt-2"></p></div></div></div><div class="flex gap-3 pt-4">${isEditing ? `<button type="button" onclick="app.cancelEdit()" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-3.5 rounded-xl shadow-sm transition-all">ยกเลิก</button>` : ''}<button id="submit-btn" type="submit" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3.5 rounded-xl shadow-md hover:shadow-lg transition-all flex justify-center items-center"><i data-lucide="loader-2" id="submit-btn-loader" class="hidden animate-spin mr-2 w-5 h-5"></i><span id="submit-btn-text">${isEditing ? 'บันทึกการแก้ไข' : 'บันทึกข้อมูล'}</span></button></div></form></div>`;
             },
 
-            attachFormListeners() {
-                const form = document.getElementById('report-form');
-                if (form) {
-                    const fileInput = document.getElementById('image-input');
-                    const fileNameDisplay = document.getElementById('file-name-display');
-                    
-                    // Show filename when selected
-                    fileInput.addEventListener('change', (e) => {
-                        if(e.target.files[0]) fileNameDisplay.textContent = e.target.files[0].name;
-                    });
+            attachFormListeners() { /* Same */ this.getReportFormHTMLTemplate(); const form = document.getElementById('report-form'); if(form) { /* ... copied logic ... */ 
+                const fileInput = document.getElementById('image-input');
+                const fileNameDisplay = document.getElementById('file-name-display');
+                fileInput.addEventListener('change', (e) => { if(e.target.files[0]) fileNameDisplay.textContent = e.target.files[0].name; });
+                const isEditing = !!this.state.editingReportId;
+                const editingReport = isEditing ? this.state.reports.find(r => r.id === this.state.editingReportId) : null;
+                const updateStudentDropdown = (classLevel, targetSelectId, selectedValue = null) => {
+                    const targetSelect = document.getElementById(targetSelectId);
+                    if (!targetSelect) return;
+                    targetSelect.innerHTML = '<option value="">-- เลือกรายชื่อ --</option>';
+                    if (!classLevel) { targetSelect.disabled = true; return; }
+                    const filtered = this.state.students.filter(s => s.classLevel === classLevel);
+                    if (filtered.length === 0) { targetSelect.innerHTML = '<option value="">-- ไม่พบรายชื่อในชั้นนี้ --</option>'; targetSelect.disabled = true; } else { filtered.sort((a, b) => a.name.localeCompare(b.name, 'th')); filtered.forEach(s => { const opt = document.createElement('option'); opt.value = s.name; opt.textContent = s.name; if(selectedValue === s.name) opt.selected = true; targetSelect.appendChild(opt); }); targetSelect.disabled = false; }
+                };
+                const reporterClassFilter = document.getElementById('reporter-class-filter');
+                if (reporterClassFilter) { reporterClassFilter.addEventListener('change', (e) => updateStudentDropdown(e.target.value, 'reporter-name-select')); if(isEditing && reporterClassFilter.value) updateStudentDropdown(reporterClassFilter.value, 'reporter-name-select', editingReport.reporterName); }
+                const offenderClassSelect = document.getElementById('offender-class-select');
+                if (offenderClassSelect) { offenderClassSelect.addEventListener('change', (e) => updateStudentDropdown(e.target.value, 'offender-name-select')); if(isEditing && offenderClassSelect.value) updateStudentDropdown(offenderClassSelect.value, 'offender-name-select', editingReport.name); }
+                form.addEventListener('submit', async (e) => { e.preventDefault(); const formData = new FormData(form); const data = Object.fromEntries(formData.entries()); if (fileInput && fileInput.files[0]) { try { data.image = await this.readFileAsDataURL(fileInput.files[0]); } catch (err) {} } else if (isEditing && editingReport.image) { data.image = editingReport.image; } this.addReport(data); });
+            }},
 
-                    const isEditing = !!this.state.editingReportId;
-                    const editingReport = isEditing ? this.state.reports.find(r => r.id === this.state.editingReportId) : null;
-                    
-                    const updateStudentDropdown = (classLevel, targetSelectId, selectedValue = null) => {
-                        const targetSelect = document.getElementById(targetSelectId);
-                        if (!targetSelect) return;
-                        
-                        targetSelect.innerHTML = '<option value="">-- เลือกรายชื่อ --</option>';
-                        
-                        if (!classLevel) { 
-                            targetSelect.disabled = true; 
-                            return; 
-                        }
-                        
-                        const filtered = this.state.students.filter(s => s.classLevel === classLevel);
-                        
-                        if (filtered.length === 0) { 
-                            targetSelect.innerHTML = '<option value="">-- ไม่พบรายชื่อในชั้นนี้ --</option>'; 
-                            targetSelect.disabled = true; 
-                        } else {
-                            filtered.sort((a, b) => a.name.localeCompare(b.name, 'th'));
-                            filtered.forEach(s => { 
-                                const opt = document.createElement('option'); 
-                                opt.value = s.name; 
-                                opt.textContent = s.name; 
-                                if(selectedValue === s.name) opt.selected = true; 
-                                targetSelect.appendChild(opt); 
-                            });
-                            targetSelect.disabled = false;
-                        }
-                    };
-
-                    const reporterClassFilter = document.getElementById('reporter-class-filter');
-                    if (reporterClassFilter) {
-                        reporterClassFilter.addEventListener('change', (e) => updateStudentDropdown(e.target.value, 'reporter-name-select'));
-                        if(isEditing && reporterClassFilter.value) updateStudentDropdown(reporterClassFilter.value, 'reporter-name-select', editingReport.reporterName);
-                    }
-
-                    const offenderClassSelect = document.getElementById('offender-class-select');
-                    if (offenderClassSelect) {
-                        offenderClassSelect.addEventListener('change', (e) => updateStudentDropdown(e.target.value, 'offender-name-select'));
-                        if(isEditing && offenderClassSelect.value) updateStudentDropdown(offenderClassSelect.value, 'offender-name-select', editingReport.name);
-                    }
-
-                    form.addEventListener('submit', async (e) => {
-                        e.preventDefault();
-                        const formData = new FormData(form);
-                        const data = Object.fromEntries(formData.entries());
-                        
-                        if (fileInput && fileInput.files[0]) { 
-                            try { 
-                                data.image = await this.readFileAsDataURL(fileInput.files[0]); 
-                            } catch (err) {} 
-                        } else if (isEditing && editingReport.image) {
-                             data.image = editingReport.image;
-                        }
-                        
-                        this.addReport(data);
-                    });
-                }
-            },
-
-            getSearchHTML() {
-                return `
-                    <div class="max-w-4xl mx-auto animate-fade-in pb-12">
-                        <h2 class="text-2xl font-bold text-gray-800 mb-6 flex items-center">
-                            <div class="bg-emerald-100 p-2 rounded-lg mr-3">
-                                <i data-lucide="list-checks" class="text-emerald-600 w-6 h-6"></i>
-                            </div>
-                            สรุปรายการแจ้งเหตุ
-                        </h2>
-                        
-                        <div class="bg-white p-4 rounded-2xl shadow-md mb-8 border border-gray-200 sticky top-20 z-20">
-                            <div class="relative">
-                                <i data-lucide="search" class="absolute left-3 top-3.5 text-gray-400 w-5 h-5"></i>
-                                <input id="search-input" type="text" placeholder="ค้นหาชื่อ, ชั้น, หรือ ประเภทขยะ..." class="w-full pl-10 p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-gray-700 transition-shadow">
-                            </div>
-                        </div>
-                        
-                        <div id="search-results" class="space-y-8 min-h-[300px]">
-                            <div class="flex flex-col items-center justify-center h-full text-gray-400 py-12">
-                                <i data-lucide="loader" class="w-8 h-8 animate-spin mb-2"></i>
-                                <span>กำลังโหลดข้อมูล...</span>
-                            </div>
-                        </div>
-                    </div>`;
-            },
+            getSearchHTML() { /* Same */ return `<div class="max-w-4xl mx-auto animate-fade-in pb-12"><h2 class="text-2xl font-bold text-gray-800 mb-6 flex items-center"><div class="bg-emerald-100 p-2 rounded-lg mr-3"><i data-lucide="list-checks" class="text-emerald-600 w-6 h-6"></i></div>สรุปรายการแจ้งเหตุ</h2><div class="bg-white p-4 rounded-2xl shadow-md mb-8 border border-gray-200 sticky top-20 z-20"><div class="relative"><i data-lucide="search" class="absolute left-3 top-3.5 text-gray-400 w-5 h-5"></i><input id="search-input" type="text" placeholder="ค้นหาชื่อ, ชั้น, หรือ ประเภทขยะ..." class="w-full pl-10 p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-gray-700 transition-shadow"></div></div><div id="search-results" class="space-y-8 min-h-[300px]"><div class="flex flex-col items-center justify-center h-full text-gray-400 py-12"><i data-lucide="loader" class="w-8 h-8 animate-spin mb-2"></i><span>กำลังโหลดข้อมูล...</span></div></div></div>`; },
 
             attachSearchListeners() {
                 const input = document.getElementById('search-input');
                 const resultsDiv = document.getElementById('search-results');
-                
                 const renderReports = (filter = "") => {
                     const term = filter.toLowerCase();
-                    let filtered = this.state.reports.filter(r => 
-                        r.name.toLowerCase().includes(term) || 
-                        r.classLevel.toLowerCase().includes(term) || 
-                        (r.reporterName && r.reporterName.toLowerCase().includes(term)) || 
-                        r.trashType.toLowerCase().includes(term)
-                    );
-                    
-                    if (filtered.length === 0) { 
-                        resultsDiv.innerHTML = `
-                            <div class="text-center py-12 bg-white rounded-2xl border border-gray-100 shadow-sm">
-                                <div class="bg-gray-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                                    <i data-lucide="inbox" class="w-8 h-8 text-gray-400"></i>
-                                </div>
-                                <p class="text-gray-500">ไม่พบข้อมูลที่ค้นหา</p>
-                            </div>`; 
-                        return; 
-                    }
-
-                    // Group by Date
+                    let filtered = this.state.reports.filter(r => r.name.toLowerCase().includes(term) || r.classLevel.toLowerCase().includes(term) || (r.reporterName && r.reporterName.toLowerCase().includes(term)) || r.trashType.toLowerCase().includes(term));
+                    if (filtered.length === 0) { resultsDiv.innerHTML = `<div class="text-center py-12 bg-white rounded-2xl border border-gray-100 shadow-sm"><div class="bg-gray-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"><i data-lucide="inbox" class="w-8 h-8 text-gray-400"></i></div><p class="text-gray-500">ไม่พบข้อมูลที่ค้นหา</p></div>`; return; }
                     const grouped = {};
-                    filtered.forEach(r => {
-                        const dateKey = this.formatThaiDate(r.timestamp, { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
-                        if (!grouped[dateKey]) grouped[dateKey] = [];
-                        grouped[dateKey].push(r);
-                    });
-
+                    filtered.forEach(r => { const dateKey = this.formatThaiDate(r.timestamp, 'full'); if (!grouped[dateKey]) grouped[dateKey] = []; grouped[dateKey].push(r); });
                     let html = "";
                     for (const date in grouped) {
-                        html += `
-                            <div class="animate-fade-in">
-                                <h3 class="text-sm font-bold text-gray-500 mb-3 ml-2 flex items-center">
-                                    <span class="w-2 h-2 rounded-full bg-emerald-400 mr-2"></span>
-                                    ${date}
-                                </h3>
-                                <div class="space-y-3">`;
-                        
-                        grouped[date].forEach(r => {
-                            html += `
-                                <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 relative group hover:shadow-md transition-shadow">
-                                    <div class="flex justify-between items-start mb-3">
-                                        <div class="flex items-center gap-2">
-                                            <span class="bg-emerald-100 text-emerald-800 text-xs font-bold px-2.5 py-0.5 rounded-full">${r.classLevel}</span>
-                                            <span class="text-xs text-gray-400 flex items-center">
-                                                <i data-lucide="clock" class="w-3 h-3 mr-1"></i>
-                                                ${new Date(r.timestamp).toLocaleTimeString('th-TH', {hour: '2-digit', minute:'2-digit'})}
-                                            </span>
-                                        </div>
-                                        <div class="flex gap-2 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <button onclick="app.editReport(${r.id})" class="text-blue-500 hover:text-blue-700 p-1.5 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors" title="แก้ไข">
-                                                <i data-lucide="edit-2" class="w-4 h-4"></i>
-                                            </button>
-                                            <button onclick="app.deleteReport(${r.id})" class="text-red-500 hover:text-red-700 p-1.5 bg-red-50 rounded-lg hover:bg-red-100 transition-colors" title="ลบ">
-                                                <i data-lucide="trash-2" class="w-4 h-4"></i>
-                                            </button>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="flex flex-col sm:flex-row gap-4">
-                                        <div class="flex-grow">
-                                            <h4 class="font-bold text-gray-800 text-lg leading-tight">${r.name}</h4>
-                                            
-                                            <div class="mt-2 text-sm text-gray-600 grid grid-cols-1 sm:grid-cols-2 gap-y-1 gap-x-4">
-                                                <div class="flex items-center">
-                                                    <i data-lucide="map-pin" class="w-3.5 h-3.5 mr-1.5 text-gray-400"></i>
-                                                    ${r.location}
-                                                </div>
-                                                <div class="flex items-center">
-                                                    <i data-lucide="trash" class="w-3.5 h-3.5 mr-1.5 text-gray-400"></i>
-                                                    ${r.trashType}
-                                                </div>
-                                            </div>
-
-                                            ${r.details ? `<p class="text-xs text-gray-500 mt-3 bg-gray-50 p-2.5 rounded-lg border border-gray-100 italic">"${r.details}"</p>` : ''}
-                                            
-                                            <div class="border-t border-gray-50 mt-3 pt-2">
-                                                 <p class="text-xs text-emerald-600 flex items-center font-medium">
-                                                    <i data-lucide="user-check" class="w-3 h-3 mr-1.5"></i> 
-                                                    แจ้งโดย: ${r.reporterName || '-'}
-                                                </p>
-                                            </div>
-                                        </div>
-                                        
-                                        ${r.image ? `
-                                            <div class="sm:w-24 sm:h-24 w-full h-40 bg-gray-100 rounded-lg overflow-hidden border border-gray-200 flex-shrink-0 cursor-pointer hover:opacity-90" onclick="window.open('${r.image}')">
-                                                <img src="${r.image}" class="w-full h-full object-cover" alt="หลักฐาน">
-                                            </div>` : ''}
-                                    </div>
-                                </div>`;
-                        });
-                        
+                        html += `<div class="animate-fade-in"><h3 class="text-sm font-bold text-gray-500 mb-3 ml-2 flex items-center"><span class="w-2 h-2 rounded-full bg-emerald-400 mr-2"></span>${date}</h3><div class="space-y-3">`;
+                        grouped[date].forEach(r => { html += `<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 relative group hover:shadow-md transition-shadow"><div class="flex justify-between items-start mb-3"><div class="flex items-center gap-2"><span class="bg-emerald-100 text-emerald-800 text-xs font-bold px-2.5 py-0.5 rounded-full">${r.classLevel}</span><span class="text-xs text-gray-400 flex items-center"><i data-lucide="clock" class="w-3 h-3 mr-1"></i>${new Date(r.timestamp).toLocaleTimeString('th-TH', {hour: '2-digit', minute:'2-digit'})}</span></div><div class="flex gap-2 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity"><button onclick="app.editReport(${r.id})" class="text-blue-500 hover:text-blue-700 p-1.5 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors" title="แก้ไข"><i data-lucide="edit-2" class="w-4 h-4"></i></button><button onclick="app.deleteReport(${r.id})" class="text-red-500 hover:text-red-700 p-1.5 bg-red-50 rounded-lg hover:bg-red-100 transition-colors" title="ลบ"><i data-lucide="trash-2" class="w-4 h-4"></i></button></div></div><div class="flex flex-col sm:flex-row gap-4"><div class="flex-grow"><h4 class="font-bold text-gray-800 text-lg leading-tight">${r.name}</h4><div class="mt-2 text-sm text-gray-600 grid grid-cols-1 sm:grid-cols-2 gap-y-1 gap-x-4"><div class="flex items-center"><i data-lucide="map-pin" class="w-3.5 h-3.5 mr-1.5 text-gray-400"></i>${r.location}</div><div class="flex items-center"><i data-lucide="trash" class="w-3.5 h-3.5 mr-1.5 text-gray-400"></i>${r.trashType}</div></div>${r.details ? `<p class="text-xs text-gray-500 mt-3 bg-gray-50 p-2.5 rounded-lg border border-gray-100 italic">"${r.details}"</p>` : ''}<div class="border-t border-gray-50 mt-3 pt-2"><p class="text-xs text-emerald-600 flex items-center font-medium"><i data-lucide="user-check" class="w-3 h-3 mr-1.5"></i> แจ้งโดย: ${r.reporterName || '-'}</p></div></div>${r.image ? `<div class="sm:w-24 sm:h-24 w-full h-40 bg-gray-100 rounded-lg overflow-hidden border border-gray-200 flex-shrink-0 cursor-pointer hover:opacity-90" onclick="window.open('${r.image}')"><img src="${r.image}" class="w-full h-full object-cover" alt="หลักฐาน"></div>` : ''}</div></div>`; });
                         html += `</div></div><div class="h-6"></div>`;
                     }
                     resultsDiv.innerHTML = html;
                     lucide.createIcons();
                 };
-                
                 renderReports();
                 input.addEventListener('input', (e) => renderReports(e.target.value));
             },
 
-            getAwardsHTML() {
+            getAwardsHTML() { /* Same */ return `<div class="animate-fade-in pb-12"><div class="text-center mb-10 bg-white p-8 rounded-2xl shadow-sm border border-gray-100"><div class="inline-flex items-center justify-center w-20 h-20 rounded-full bg-yellow-100 mb-4 shadow-inner"><i data-lucide="trophy" class="w-10 h-10 text-yellow-500"></i></div><h2 class="text-3xl font-bold text-gray-800">ทำเนียบเกียรติยศ</h2><p class="text-gray-500 mt-2">ติดตามความสะอาดและวินัยของแต่ละห้องเรียน</p></div><div class="mb-8"><h3 class="font-bold text-lg text-emerald-800 mb-4 flex items-center"><i data-lucide="sparkles" class="mr-2 w-5 h-5 text-emerald-500"></i> ห้องเรียนต้นแบบ (ไร้ขยะ)</h3>${this.getTopCleanHTML()}</div><div class="bg-white rounded-2xl shadow-lg p-6 border border-gray-100"><h3 class="font-bold text-gray-700 mb-6 flex items-center"><i data-lucide="bar-chart-3" class="mr-2 w-5 h-5 text-blue-500"></i> สถิติความสะอาด (จำนวนครั้งที่ถูกแจ้ง)</h3><div class="chart-container" style="height: 400px;"><canvas id="awardsChart"></canvas></div><p class="text-center text-xs text-gray-400 mt-4 bg-gray-50 py-2 rounded">* กราฟแสดงจำนวนครั้งที่ถูกแจ้งเหตุ (แท่งกราฟต่ำ = ดีเยี่ยม)</p></div></div>`; },
+            getTopCleanHTML() {
                 const stats = {};
                 this.state.config.classLevels.forEach(c => stats[c] = 0);
-                this.state.reports.forEach(r => { 
-                    if (stats[r.classLevel] !== undefined) stats[r.classLevel]++; 
-                    else stats[r.classLevel] = (stats[r.classLevel] || 0) + 1; 
-                });
-                
-                // Class with 0 reports
+                this.state.reports.forEach(r => { if (stats[r.classLevel] !== undefined) stats[r.classLevel]++; else stats[r.classLevel] = (stats[r.classLevel] || 0) + 1; });
                 const topClean = Object.entries(stats).filter(i => i[1] === 0).map(i => i[0]);
-                
-                const topCleanHTML = topClean.length > 0 ? 
-                    `<div class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3 mb-8">
-                        ${topClean.map(room => `
-                            <div class="bg-gradient-to-b from-white to-emerald-50 border-2 border-emerald-200 text-center py-4 rounded-xl shadow-sm relative overflow-hidden group">
-                                <div class="absolute top-0 right-0 p-1"><i data-lucide="star" class="w-3 h-3 text-yellow-400 fill-current"></i></div>
-                                <span class="text-emerald-700 font-bold text-lg">${room}</span>
-                                <p class="text-[10px] text-emerald-500 uppercase mt-1">Clean</p>
-                            </div>`).join('')}
-                    </div>` : 
-                    `<div class="text-center text-gray-500 italic py-8 bg-white rounded-xl mb-8 border border-gray-100 flex flex-col items-center">
-                        <i data-lucide="frown" class="w-8 h-8 text-gray-300 mb-2"></i>
-                        เดือนนี้มีการแจ้งเหตุครบทุกห้อง สู้ใหม่เดือนหน้านะ!
-                    </div>`;
-
-                return `
-                    <div class="animate-fade-in pb-12">
-                        <div class="text-center mb-10 bg-white p-8 rounded-2xl shadow-sm border border-gray-100">
-                            <div class="inline-flex items-center justify-center w-20 h-20 rounded-full bg-yellow-100 mb-4 shadow-inner">
-                                <i data-lucide="trophy" class="w-10 h-10 text-yellow-500"></i>
-                            </div>
-                            <h2 class="text-3xl font-bold text-gray-800">ทำเนียบเกียรติยศ</h2>
-                            <p class="text-gray-500 mt-2">ติดตามความสะอาดและวินัยของแต่ละห้องเรียน</p>
-                        </div>
-
-                        <div class="mb-8">
-                            <h3 class="font-bold text-lg text-emerald-800 mb-4 flex items-center">
-                                <i data-lucide="sparkles" class="mr-2 w-5 h-5 text-emerald-500"></i> 
-                                ห้องเรียนต้นแบบ (ไร้ขยะ)
-                            </h3>
-                            ${topCleanHTML}
-                        </div>
-
-                        <div class="bg-white rounded-2xl shadow-lg p-6 border border-gray-100">
-                            <h3 class="font-bold text-gray-700 mb-6 flex items-center">
-                                <i data-lucide="bar-chart-3" class="mr-2 w-5 h-5 text-blue-500"></i> 
-                                สถิติความสะอาด (จำนวนครั้งที่ถูกแจ้ง)
-                            </h3>
-                            <div class="chart-container" style="height: 400px;">
-                                <canvas id="awardsChart"></canvas>
-                            </div>
-                            <p class="text-center text-xs text-gray-400 mt-4 bg-gray-50 py-2 rounded">* กราฟแสดงจำนวนครั้งที่ถูกแจ้งเหตุ (แท่งกราฟต่ำ = ดีเยี่ยม)</p>
-                        </div>
-                    </div>`;
+                return topClean.length > 0 ? `<div class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3 mb-8">${topClean.map(room => `<div class="bg-gradient-to-b from-white to-emerald-50 border-2 border-emerald-200 text-center py-4 rounded-xl shadow-sm relative overflow-hidden group"><div class="absolute top-0 right-0 p-1"><i data-lucide="star" class="w-3 h-3 text-yellow-400 fill-current"></i></div><span class="text-emerald-700 font-bold text-lg">${room}</span><p class="text-[10px] text-emerald-500 uppercase mt-1">Clean</p></div>`).join('')}</div>` : `<div class="text-center text-gray-500 italic py-8 bg-white rounded-xl mb-8 border border-gray-100 flex flex-col items-center"><i data-lucide="frown" class="w-8 h-8 text-gray-300 mb-2"></i>เดือนนี้มีการแจ้งเหตุครบทุกห้อง สู้ใหม่เดือนหน้านะ!</div>`;
             },
 
-            getExecutiveHTML() {
+            getExecutiveHTML() { /* Same */ return this.getExecutiveHTMLTemplate(); },
+            getExecutiveHTMLTemplate() {
                 const total = this.state.reports.length;
                 const today = new Date().toDateString();
                 const todayCount = this.state.reports.filter(r => new Date(r.timestamp).toDateString() === today).length;
-                
                 const trashCounts = {};
                 this.state.reports.forEach(r => trashCounts[r.trashType] = (trashCounts[r.trashType] || 0) + 1);
                 const topTrash = Object.entries(trashCounts).sort((a,b) => b[1]-a[1])[0] || ['-', 0];
-
-                return `
-                    <div class="animate-fade-in pb-12">
-                        <div class="flex items-center justify-between mb-8 bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                            <div>
-                                <h2 class="text-2xl font-bold text-gray-800 flex items-center">
-                                    <i data-lucide="presentation" class="mr-3 text-emerald-600 w-8 h-8"></i>
-                                    Dashboard ผู้บริหาร
-                                </h2>
-                                <p class="text-sm text-gray-500 mt-1">สรุปสถานการณ์ความสะอาดและวินัยนักเรียนภาพรวม</p>
-                            </div>
-                            <div class="text-right hidden sm:block">
-                                <span class="bg-emerald-100 text-emerald-800 text-xs font-bold px-3 py-1 rounded-full">อัปเดต: Realtime</span>
-                            </div>
-                        </div>
-
-                        <!-- KPI Cards -->
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
-                            <!-- [UPDATED] Card 1: Total Reports (Matches List) -->
-                            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
-                                <div class="flex justify-between items-start mb-2">
-                                    <p class="text-sm text-gray-500 font-medium">ยอดแจ้งเหตุสะสม</p>
-                                    <span class="p-1.5 bg-blue-100 rounded-lg"><i data-lucide="folder-open" class="w-4 h-4 text-blue-600"></i></span>
-                                </div>
-                                <p class="text-4xl font-bold text-emerald-600">${total}</p>
-                                <p class="text-xs text-gray-400 mt-2">วันนี้ ${todayCount} ครั้ง</p>
-                            </div>
-
-                            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
-                                <div class="flex justify-between items-start mb-2">
-                                    <p class="text-sm text-gray-500 font-medium">ขยะที่พบมากสุด</p>
-                                    <span class="p-1.5 bg-orange-100 rounded-lg"><i data-lucide="trash" class="w-4 h-4 text-orange-600"></i></span>
-                                </div>
-                                <p class="text-xl font-bold text-gray-800 truncate" title="${topTrash[0]}">${topTrash[0]}</p>
-                                <p class="text-xs text-gray-400 mt-2">จำนวน ${topTrash[1]} ครั้ง</p>
-                            </div>
-
-                            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
-                                <div class="flex justify-between items-start mb-2">
-                                    <p class="text-sm text-gray-500 font-medium">สถานะภาพรวม (วันนี้)</p>
-                                    <span class="p-1.5 bg-green-100 rounded-lg"><i data-lucide="activity" class="w-4 h-4 text-green-600"></i></span>
-                                </div>
-                                <p class="text-lg font-bold ${todayCount > 5 ? 'text-red-500' : 'text-emerald-500'}">
-                                    ${todayCount > 5 ? 'ต้องเฝ้าระวัง' : 'ปกติ/ดีเยี่ยม'}
-                                </p>
-                                <p class="text-xs text-gray-400 mt-2">${todayCount > 5 ? 'มีการแจ้งเหตุสูงกว่าเกณฑ์' : 'อยู่ในเกณฑ์ที่น่าพอใจ'}</p>
-                            </div>
-                        </div>
-
-                        <!-- Charts Row 1 -->
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                            <div class="bg-white p-6 rounded-2xl shadow-lg border border-gray-100">
-                                <h3 class="font-bold text-gray-700 mb-6 text-sm uppercase tracking-wide">สัดส่วนประเภทขยะ</h3>
-                                <div class="chart-container" style="height: 250px;">
-                                    <canvas id="trashChart"></canvas>
-                                </div>
-                            </div>
-                            <div class="bg-white p-6 rounded-2xl shadow-lg border border-gray-100">
-                                <h3 class="font-bold text-gray-700 mb-6 text-sm uppercase tracking-wide">จุดเสี่ยงที่พบขยะบ่อย</h3>
-                                <div class="chart-container" style="height: 250px;">
-                                    <canvas id="locationChart"></canvas>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Charts Row 2 -->
-                        <div class="bg-white p-6 rounded-2xl shadow-lg border border-gray-100">
-                            <h3 class="font-bold text-gray-700 mb-4 text-sm uppercase tracking-wide">แนวโน้มการแจ้งเหตุ (7 วันย้อนหลัง)</h3>
-                            <div class="chart-container" style="height: 300px;">
-                                <canvas id="trendChart"></canvas>
-                            </div>
-                        </div>
-                    </div>`;
+                return `<div class="animate-fade-in pb-12"><div class="flex items-center justify-between mb-8 bg-white p-6 rounded-2xl shadow-sm border border-gray-100"><div><h2 class="text-2xl font-bold text-gray-800 flex items-center"><i data-lucide="presentation" class="mr-3 text-emerald-600 w-8 h-8"></i>Dashboard ผู้บริหาร</h2><p class="text-sm text-gray-500 mt-1">สรุปสถานการณ์ความสะอาดและวินัยนักเรียนภาพรวม</p></div><div class="text-right hidden sm:block"><span class="bg-emerald-100 text-emerald-800 text-xs font-bold px-3 py-1 rounded-full">อัปเดต: Realtime</span></div></div><div class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8"><div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-200"><div class="flex justify-between items-start mb-2"><p class="text-sm text-gray-500 font-medium">ยอดแจ้งเหตุสะสม</p><span class="p-1.5 bg-blue-100 rounded-lg"><i data-lucide="folder-open" class="w-4 h-4 text-blue-600"></i></span></div><p class="text-4xl font-bold text-emerald-600">${total}</p><p class="text-xs text-gray-400 mt-2">วันนี้ ${todayCount} ครั้ง</p></div><div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-200"><div class="flex justify-between items-start mb-2"><p class="text-sm text-gray-500 font-medium">ขยะที่พบมากสุด</p><span class="p-1.5 bg-orange-100 rounded-lg"><i data-lucide="trash" class="w-4 h-4 text-orange-600"></i></span></div><p class="text-xl font-bold text-gray-800 truncate" title="${topTrash[0]}">${topTrash[0]}</p><p class="text-xs text-gray-400 mt-2">จำนวน ${topTrash[1]} ครั้ง</p></div><div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-200"><div class="flex justify-between items-start mb-2"><p class="text-sm text-gray-500 font-medium">สถานะภาพรวม (วันนี้)</p><span class="p-1.5 bg-green-100 rounded-lg"><i data-lucide="activity" class="w-4 h-4 text-green-600"></i></span></div><p class="text-lg font-bold ${todayCount > 5 ? 'text-red-500' : 'text-emerald-500'}">${todayCount > 5 ? 'ต้องเฝ้าระวัง' : 'ปกติ/ดีเยี่ยม'}</p><p class="text-xs text-gray-400 mt-2">${todayCount > 5 ? 'มีการแจ้งเหตุสูงกว่าเกณฑ์' : 'อยู่ในเกณฑ์ที่น่าพอใจ'}</p></div></div><div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6"><div class="bg-white p-6 rounded-2xl shadow-lg border border-gray-100"><h3 class="font-bold text-gray-700 mb-6 text-sm uppercase tracking-wide">สัดส่วนประเภทขยะ</h3><div class="chart-container" style="height: 250px;"><canvas id="trashChart"></canvas></div></div><div class="bg-white p-6 rounded-2xl shadow-lg border border-gray-100"><h3 class="font-bold text-gray-700 mb-6 text-sm uppercase tracking-wide">จุดเสี่ยงที่พบขยะบ่อย</h3><div class="chart-container" style="height: 250px;"><canvas id="locationChart"></canvas></div></div></div><div class="bg-white p-6 rounded-2xl shadow-lg border border-gray-100"><h3 class="font-bold text-gray-700 mb-4 text-sm uppercase tracking-wide">แนวโน้มการแจ้งเหตุ (7 วันย้อนหลัง)</h3><div class="chart-container" style="height: 300px;"><canvas id="trendChart"></canvas></div></div></div>`;
             },
 
-            getSettingsHTML() {
-                const renderList = (items, type) => items.map((item, idx) => `
-                    <div class="flex justify-between items-center p-3 hover:bg-gray-50 border-b last:border-0 border-gray-100 transition-colors">
-                        <span class="text-sm text-gray-700 font-medium">${item}</span>
-                        <button onclick="app.removeConfigItem('${type}', ${idx})" class="text-gray-300 hover:text-red-500 transition-colors">
-                            <i data-lucide="x-circle" class="w-5 h-5"></i>
-                        </button>
-                    </div>`).join('');
-
-                const renderCard = (title, icon, type, items, placeholder) => `
-                    <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-full">
-                        <div class="bg-gray-50 px-4 py-3 border-b border-gray-200 flex justify-between items-center">
-                            <h3 class="font-bold text-gray-700 flex items-center text-sm">
-                                <i data-lucide="${icon}" class="w-4 h-4 mr-2 text-emerald-600"></i>${title}
-                            </h3>
-                            <button onclick="app.resetConfig('${type}')" class="text-xs text-blue-500 hover:text-blue-700 underline">ค่าเริ่มต้น</button>
-                        </div>
-                        <div class="max-h-60 overflow-y-auto flex-grow custom-scrollbar">
-                            ${renderList(items, type)}
-                        </div>
-                        <div class="p-3 border-t border-gray-100 bg-gray-50">
-                            <form onsubmit="event.preventDefault(); app.addConfigItem('${type}', this.elements[0].value); this.reset();" class="flex gap-2">
-                                <input type="text" placeholder="${placeholder}" required class="flex-1 p-2 text-sm border rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-                                <button type="submit" class="bg-emerald-600 text-white px-3 py-2 rounded-lg hover:bg-emerald-700 shadow-sm">
-                                    <i data-lucide="plus" class="w-4 h-4"></i>
-                                </button>
-                            </form>
-                        </div>
-                    </div>`;
-
-                const scriptUrl = this.state.config.scriptUrl || '';
-
-                return `
-                    <div class="max-w-4xl mx-auto animate-fade-in pb-12">
-                        <h2 class="text-2xl font-bold text-gray-800 mb-6 flex items-center">
-                            <div class="bg-emerald-100 p-2 rounded-lg mr-3">
-                                <i data-lucide="settings" class="text-emerald-600 w-6 h-6"></i>
-                            </div>
-                            ตั้งค่าระบบ
-                        </h2>
-
-                        <!-- Connection Settings -->
-                        <div class="bg-white p-6 rounded-2xl shadow-sm border border-blue-100 mb-8">
-                            <h3 class="font-bold text-gray-800 mb-4 flex items-center">
-                                <span class="bg-blue-100 p-1.5 rounded-lg mr-2"><i data-lucide="cloud-cog" class="w-5 h-5 text-blue-600"></i></span> 
-                                เชื่อมต่อ Google Sheets
-                            </h3>
-                            <div class="bg-blue-50/50 p-4 rounded-xl border border-blue-100 mb-4">
-                                <p class="text-sm text-gray-600 mb-2">นำ <strong>Web App URL</strong> ที่ได้จากการ Deploy Google Apps Script มาวางที่นี่เพื่อเปิดใช้งานการบันทึกข้อมูลออนไลน์</p>
-                            </div>
-                            <form id="script-url-form" class="flex gap-3">
-                                <div class="flex-grow relative">
-                                    <i data-lucide="link" class="absolute left-3 top-3.5 text-gray-400 w-4 h-4"></i>
-                                    <input type="text" name="url" value="${scriptUrl}" placeholder="https://script.google.com/macros/s/..." class="w-full pl-10 p-3 bg-gray-50 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none font-mono text-gray-600">
-                                </div>
-                                <button type="submit" class="bg-blue-600 text-white px-6 py-3 rounded-xl hover:bg-blue-700 font-bold text-sm shadow-md transition-all whitespace-nowrap">บันทึก URL</button>
-                            </form>
-                        </div>
-                        
-                        <!-- List Configurations -->
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            ${renderCard('รายการระดับชั้น', 'users', 'classLevels', this.state.config.classLevels, 'เช่น ม.1/4')}
-                            ${renderCard('จุดที่พบขยะ', 'map-pin', 'locations', this.state.config.locations, 'เช่น หน้าสหกรณ์')}
-                            ${renderCard('ประเภทขยะ', 'trash-2', 'trashTypes', this.state.config.trashTypes, 'เช่น โฟม')}
-                        </div>
-                        
-                        <div class="mt-8 text-center">
-                            <p class="text-xs text-gray-400">Version 1.0.0 &bull; LocalStorage Usage: ${(JSON.stringify(localStorage).length / 1024).toFixed(2)} KB</p>
-                        </div>
-                    </div>`;
+            getSettingsHTML() { /* Same */ return `<div class="max-w-4xl mx-auto animate-fade-in pb-12"><h2 class="text-2xl font-bold text-gray-800 mb-6 flex items-center"><div class="bg-emerald-100 p-2 rounded-lg mr-3"><i data-lucide="settings" class="text-emerald-600 w-6 h-6"></i></div>ตั้งค่าระบบ</h2><div class="bg-white p-6 rounded-2xl shadow-sm border border-blue-100 mb-8"><h3 class="font-bold text-gray-800 mb-4 flex items-center"><span class="bg-blue-100 p-1.5 rounded-lg mr-2"><i data-lucide="cloud-cog" class="w-5 h-5 text-blue-600"></i></span> เชื่อมต่อ Google Sheets</h3><div class="bg-blue-50/50 p-4 rounded-xl border border-blue-100 mb-4"><p class="text-sm text-gray-600 mb-2">นำ <strong>Web App URL</strong> ที่ได้จากการ Deploy Google Apps Script มาวางที่นี่เพื่อเปิดใช้งานการบันทึกข้อมูลออนไลน์</p></div><form id="script-url-form" class="flex gap-3"><div class="flex-grow relative"><i data-lucide="link" class="absolute left-3 top-3.5 text-gray-400 w-4 h-4"></i><input type="text" name="url" value="${this.state.config.scriptUrl || ''}" placeholder="https://script.google.com/macros/s/..." class="w-full pl-10 p-3 bg-gray-50 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none font-mono text-gray-600"></div><button type="submit" class="bg-blue-600 text-white px-6 py-3 rounded-xl hover:bg-blue-700 font-bold text-sm shadow-md transition-all whitespace-nowrap">บันทึก URL</button></form></div><div class="grid grid-cols-1 md:grid-cols-3 gap-6">${this.renderConfigCard('รายการระดับชั้น', 'users', 'classLevels', this.state.config.classLevels, 'เช่น ม.1/4')}${this.renderConfigCard('จุดที่พบขยะ', 'map-pin', 'locations', this.state.config.locations, 'เช่น หน้าสหกรณ์')}${this.renderConfigCard('ประเภทขยะ', 'trash-2', 'trashTypes', this.state.config.trashTypes, 'เช่น โฟม')}</div><div class="mt-8 text-center"><p class="text-xs text-gray-400">Version 1.0.0 &bull; LocalStorage Usage: ${(JSON.stringify(localStorage).length / 1024).toFixed(2)} KB</p></div></div>`; },
+            renderConfigCard(title, icon, type, items, placeholder) {
+                const renderList = items.map((item, idx) => `<div class="flex justify-between items-center p-3 hover:bg-gray-50 border-b last:border-0 border-gray-100 transition-colors"><span class="text-sm text-gray-700 font-medium">${item}</span><button onclick="app.removeConfigItem('${type}', ${idx})" class="text-gray-300 hover:text-red-500 transition-colors"><i data-lucide="x-circle" class="w-5 h-5"></i></button></div>`).join('');
+                return `<div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-full"><div class="bg-gray-50 px-4 py-3 border-b border-gray-200 flex justify-between items-center"><h3 class="font-bold text-gray-700 flex items-center text-sm"><i data-lucide="${icon}" class="w-4 h-4 mr-2 text-emerald-600"></i>${title}</h3><button onclick="app.resetConfig('${type}')" class="text-xs text-blue-500 hover:text-blue-700 underline">ค่าเริ่มต้น</button></div><div class="max-h-60 overflow-y-auto flex-grow custom-scrollbar">${renderList}</div><div class="p-3 border-t border-gray-100 bg-gray-50"><form onsubmit="event.preventDefault(); app.addConfigItem('${type}', this.elements[0].value); this.reset();" class="flex gap-2"><input type="text" placeholder="${placeholder}" required class="flex-1 p-2 text-sm border rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none"><button type="submit" class="bg-emerald-600 text-white px-3 py-2 rounded-lg hover:bg-emerald-700 shadow-sm"><i data-lucide="plus" class="w-4 h-4"></i></button></form></div></div>`;
             },
 
-            attachSettingsListeners() {
-                const urlForm = document.getElementById('script-url-form');
-                if (urlForm) {
-                    urlForm.addEventListener('submit', (e) => {
-                        e.preventDefault();
-                        const formData = new FormData(urlForm);
-                        const url = formData.get('url').trim();
-                        this.state.config.scriptUrl = url;
-                        this.saveData();
-                        this.showNotification('บันทึก URL การเชื่อมต่อเรียบร้อย');
-                    });
-                }
-            },
+            attachSettingsListeners() { /* Same */ const urlForm = document.getElementById('script-url-form'); if (urlForm) { urlForm.addEventListener('submit', (e) => { e.preventDefault(); const formData = new FormData(urlForm); const url = formData.get('url').trim(); this.state.config.scriptUrl = url; this.saveData(); this.showNotification('บันทึก URL การเชื่อมต่อเรียบร้อย'); }); }},
 
-            getStudentManagerHTML() {
-                const list = this.state.students.map((s, idx) => `
-                    <tr class="hover:bg-gray-50 border-b border-gray-100 last:border-0 transition-colors">
-                        <td class="p-4 text-sm text-gray-500 font-mono">${idx + 1}</td>
-                        <td class="p-4 text-sm font-bold text-gray-800">${s.name}</td>
-                        <td class="p-4 text-sm text-gray-600"><span class="bg-gray-100 px-2 py-1 rounded text-xs">${s.classLevel}</span></td>
-                        <td class="p-4 text-center">
-                            <span class="${s.points >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'} px-2.5 py-1 rounded-full text-xs font-bold">
-                                ${s.points > 0 ? '+' : ''}${s.points || 0}
-                            </span>
-                        </td>
-                        <td class="p-4 text-right">
-                            <button onclick="app.deleteStudent(${idx})" class="text-gray-400 hover:text-red-500 p-1 rounded-full hover:bg-red-50 transition-all">
-                                <i data-lucide="trash-2" class="w-4 h-4"></i>
-                            </button>
-                        </td>
-                    </tr>`).join('');
+            getStudentManagerHTML() { /* Same */ const list = this.state.students.map((s, idx) => `<tr class="hover:bg-gray-50 border-b border-gray-100 last:border-0 transition-colors"><td class="p-4 text-sm text-gray-500 font-mono">${idx + 1}</td><td class="p-4 text-sm font-bold text-gray-800">${s.name}</td><td class="p-4 text-sm text-gray-600"><span class="bg-gray-100 px-2 py-1 rounded text-xs">${s.classLevel}</span></td><td class="p-4 text-center"><span class="${s.points >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'} px-2.5 py-1 rounded-full text-xs font-bold">${s.points > 0 ? '+' : ''}${s.points || 0}</span></td><td class="p-4 text-right"><button onclick="app.deleteStudent(${idx})" class="text-gray-400 hover:text-red-500 p-1 rounded-full hover:bg-red-50 transition-all"><i data-lucide="trash-2" class="w-4 h-4"></i></button></td></tr>`).join(''); return `<div class="max-w-5xl mx-auto animate-fade-in pb-12"><div class="flex items-center justify-between mb-6"><h2 class="text-2xl font-bold text-gray-800 flex items-center"><div class="bg-emerald-100 p-2 rounded-lg mr-3"><i data-lucide="users" class="text-emerald-600 w-6 h-6"></i></div>จัดการรายชื่อนักเรียน</h2><div class="text-sm bg-emerald-50 text-emerald-700 px-4 py-2 rounded-lg border border-emerald-100">ทั้งหมด: <span class="font-bold text-emerald-800">${this.state.students.length}</span> คน</div></div><div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8"><div class="bg-white p-6 rounded-2xl shadow-sm border border-emerald-100"><h3 class="font-bold text-gray-700 mb-3 flex items-center"><i data-lucide="file-spreadsheet" class="mr-2 w-5 h-5 text-green-600"></i> นำเข้าไฟล์ Excel</h3><p class="text-xs text-gray-500 mb-4 bg-gray-50 p-2.5 rounded border border-gray-100 leading-relaxed"><strong>รูปแบบไฟล์ (คอลัมน์):</strong> <br>A=ชั้นเรียน, B=เลขที่, C=คำนำหน้า, D=ชื่อ, E=นามสกุล</p><label class="block w-full text-center p-4 border-2 border-dashed border-emerald-200 rounded-xl cursor-pointer hover:bg-emerald-50 hover:border-emerald-400 transition-colors group"><i data-lucide="upload-cloud" class="w-8 h-8 text-emerald-300 mx-auto mb-2 group-hover:text-emerald-500 transition-colors"></i><span class="text-sm text-gray-500 font-medium group-hover:text-emerald-700">คลิกเพื่อเลือกไฟล์ .xlsx</span><input type="file" id="excel-input" accept=".xlsx, .xls" class="hidden"></label></div><div class="bg-white p-6 rounded-2xl shadow-sm border border-blue-100 flex flex-col justify-between"><div><h3 class="font-bold text-gray-700 mb-3 flex items-center"><i data-lucide="user-plus" class="mr-2 w-5 h-5 text-blue-600"></i> เพิ่มรายชื่อใหม่</h3></div><form id="add-student-form" class="flex gap-2 items-end"><div class="flex-grow space-y-2"><input type="text" name="name" required placeholder="ชื่อ-นามสกุล" class="w-full p-2.5 bg-gray-50 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"><input type="text" name="classLevel" required placeholder="ชั้น (เช่น ม.1/1)" class="w-full p-2.5 bg-gray-50 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"></div><button type="submit" class="bg-blue-600 text-white p-3 rounded-lg hover:bg-blue-700 shadow-md h-fit mb-[1px]"><i data-lucide="plus" class="w-5 h-5"></i></button></form></div></div><div class="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden flex flex-col max-h-[600px]"><div class="p-4 bg-gray-50/80 backdrop-blur border-b border-gray-200 flex justify-between items-center sticky top-0 z-10"><h3 class="font-bold text-gray-700 text-sm uppercase tracking-wide">รายชื่อนักเรียน</h3><div class="relative"><i data-lucide="search" class="absolute left-2.5 top-2.5 w-4 h-4 text-gray-400"></i><input type="text" id="student-filter" placeholder="ค้นหาชื่อ..." class="pl-9 p-2 border border-gray-300 rounded-lg text-sm w-48 sm:w-64 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white"></div></div><div class="overflow-y-auto flex-grow custom-scrollbar"><table class="w-full text-left border-collapse"><thead class="bg-gray-100 text-gray-600 font-medium sticky top-0 shadow-sm z-0"><tr><th class="p-4 text-xs uppercase w-16">#</th><th class="p-4 text-xs uppercase">ชื่อ-นามสกุล</th><th class="p-4 text-xs uppercase w-24">ชั้น</th><th class="p-4 text-xs uppercase w-24 text-center">คะแนน</th><th class="p-4 text-xs uppercase w-16 text-right">ลบ</th></tr></thead><tbody id="student-table-body" class="divide-y divide-gray-100 text-gray-700">${list || '<tr><td colspan="5" class="p-8 text-center text-gray-400 italic">ยังไม่มีรายชื่อนักเรียนในระบบ</td></tr>'}</tbody></table></div></div></div>`; },
 
-                return `
-                    <div class="max-w-5xl mx-auto animate-fade-in pb-12">
-                        <div class="flex items-center justify-between mb-6">
-                            <h2 class="text-2xl font-bold text-gray-800 flex items-center">
-                                <div class="bg-emerald-100 p-2 rounded-lg mr-3">
-                                    <i data-lucide="users" class="text-emerald-600 w-6 h-6"></i>
-                                </div>
-                                จัดการรายชื่อนักเรียน
-                            </h2>
-                            <div class="text-sm bg-emerald-50 text-emerald-700 px-4 py-2 rounded-lg border border-emerald-100">
-                                ทั้งหมด: <span class="font-bold text-emerald-800">${this.state.students.length}</span> คน
-                            </div>
-                        </div>
+            attachStudentListeners() { /* Same */ const excelInput = document.getElementById('excel-input'); if (excelInput) excelInput.addEventListener('change', (e) => this.handleExcelImport(e)); const addForm = document.getElementById('add-student-form'); if (addForm) { addForm.addEventListener('submit', (e) => { e.preventDefault(); const data = new FormData(addForm); this.addStudent({ name: data.get('name'), classLevel: data.get('classLevel') }); addForm.reset(); }); } const filterInput = document.getElementById('student-filter'); if (filterInput) { filterInput.addEventListener('input', (e) => { const term = e.target.value.toLowerCase(); document.querySelectorAll('#student-table-body tr').forEach(row => { const name = row.querySelector('td:nth-child(2)').textContent.toLowerCase(); row.style.display = name.includes(term) ? '' : 'none'; }); }); }},
 
-                        <!-- Actions Area -->
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                            <!-- Import Excel -->
-                            <div class="bg-white p-6 rounded-2xl shadow-sm border border-emerald-100">
-                                <h3 class="font-bold text-gray-700 mb-3 flex items-center">
-                                    <i data-lucide="file-spreadsheet" class="mr-2 w-5 h-5 text-green-600"></i> นำเข้าไฟล์ Excel
-                                </h3>
-                                <p class="text-xs text-gray-500 mb-4 bg-gray-50 p-2.5 rounded border border-gray-100 leading-relaxed">
-                                    <strong>รูปแบบไฟล์ (คอลัมน์):</strong> <br>
-                                    A=ชั้นเรียน, B=เลขที่, C=คำนำหน้า, D=ชื่อ, E=นามสกุล
-                                </p>
-                                <label class="block w-full text-center p-4 border-2 border-dashed border-emerald-200 rounded-xl cursor-pointer hover:bg-emerald-50 hover:border-emerald-400 transition-colors group">
-                                    <i data-lucide="upload-cloud" class="w-8 h-8 text-emerald-300 mx-auto mb-2 group-hover:text-emerald-500 transition-colors"></i>
-                                    <span class="text-sm text-gray-500 font-medium group-hover:text-emerald-700">คลิกเพื่อเลือกไฟล์ .xlsx</span>
-                                    <input type="file" id="excel-input" accept=".xlsx, .xls" class="hidden">
-                                </label>
-                            </div>
-
-                            <!-- Add Single -->
-                            <div class="bg-white p-6 rounded-2xl shadow-sm border border-blue-100 flex flex-col justify-between">
-                                <div>
-                                    <h3 class="font-bold text-gray-700 mb-3 flex items-center">
-                                        <i data-lucide="user-plus" class="mr-2 w-5 h-5 text-blue-600"></i> เพิ่มรายชื่อใหม่
-                                    </h3>
-                                </div>
-                                <form id="add-student-form" class="flex gap-2 items-end">
-                                    <div class="flex-grow space-y-2">
-                                        <input type="text" name="name" required placeholder="ชื่อ-นามสกุล" class="w-full p-2.5 bg-gray-50 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
-                                        <input type="text" name="classLevel" required placeholder="ชั้น (เช่น ม.1/1)" class="w-full p-2.5 bg-gray-50 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
-                                    </div>
-                                    <button type="submit" class="bg-blue-600 text-white p-3 rounded-lg hover:bg-blue-700 shadow-md h-fit mb-[1px]">
-                                        <i data-lucide="plus" class="w-5 h-5"></i>
-                                    </button>
-                                </form>
-                            </div>
-                        </div>
-
-                        <!-- Table -->
-                        <div class="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden flex flex-col max-h-[600px]">
-                            <div class="p-4 bg-gray-50/80 backdrop-blur border-b border-gray-200 flex justify-between items-center sticky top-0 z-10">
-                                <h3 class="font-bold text-gray-700 text-sm uppercase tracking-wide">รายชื่อนักเรียน</h3>
-                                <div class="relative">
-                                    <i data-lucide="search" class="absolute left-2.5 top-2.5 w-4 h-4 text-gray-400"></i>
-                                    <input type="text" id="student-filter" placeholder="ค้นหาชื่อ..." class="pl-9 p-2 border border-gray-300 rounded-lg text-sm w-48 sm:w-64 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white">
-                                </div>
-                            </div>
-                            <div class="overflow-y-auto flex-grow custom-scrollbar">
-                                <table class="w-full text-left border-collapse">
-                                    <thead class="bg-gray-100 text-gray-600 font-medium sticky top-0 shadow-sm z-0">
-                                        <tr>
-                                            <th class="p-4 text-xs uppercase w-16">#</th>
-                                            <th class="p-4 text-xs uppercase">ชื่อ-นามสกุล</th>
-                                            <th class="p-4 text-xs uppercase w-24">ชั้น</th>
-                                            <th class="p-4 text-xs uppercase w-24 text-center">คะแนน</th>
-                                            <th class="p-4 text-xs uppercase w-16 text-right">ลบ</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="student-table-body" class="divide-y divide-gray-100 text-gray-700">
-                                        ${list || '<tr><td colspan="5" class="p-8 text-center text-gray-400 italic">ยังไม่มีรายชื่อนักเรียนในระบบ</td></tr>'}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>`;
-            },
-
-            attachStudentListeners() {
-                const excelInput = document.getElementById('excel-input');
-                if (excelInput) excelInput.addEventListener('change', (e) => this.handleExcelImport(e));
-                
-                const addForm = document.getElementById('add-student-form');
-                if (addForm) {
-                    addForm.addEventListener('submit', (e) => {
-                        e.preventDefault();
-                        const data = new FormData(addForm);
-                        this.addStudent({ name: data.get('name'), classLevel: data.get('classLevel') });
-                        addForm.reset();
-                    });
-                }
-
-                const filterInput = document.getElementById('student-filter');
-                if (filterInput) {
-                    filterInput.addEventListener('input', (e) => {
-                        const term = e.target.value.toLowerCase();
-                        document.querySelectorAll('#student-table-body tr').forEach(row => {
-                            const name = row.querySelector('td:nth-child(2)').textContent.toLowerCase();
-                            row.style.display = name.includes(term) ? '' : 'none';
-                        });
-                    });
-                }
-            },
-
-            // --- Chart Rendering ---
             renderCharts() {
                 if (this.state.view === 'awards') {
                     const ctx = document.getElementById('awardsChart');
                     if (!ctx) return;
-                    
                     const stats = {};
                     this.state.config.classLevels.forEach(c => stats[c] = 0);
-                    this.state.reports.forEach(r => { 
-                        if (stats[r.classLevel] !== undefined) stats[r.classLevel]++; 
-                        else stats[r.classLevel] = (stats[r.classLevel] || 0) + 1; 
-                    });
-                    
-                    const sorted = Object.entries(stats).sort((a,b) => a[1] - b[1]); // Sort Ascending (Less is better)
-
-                    this.state.chartInstances.push(new Chart(ctx, { 
-                        type: 'bar', 
-                        data: { 
-                            labels: sorted.map(i => i[0]), 
-                            datasets: [{ 
-                                label: 'จำนวนครั้งที่ถูกแจ้งเหตุ', 
-                                data: sorted.map(i => i[1]), 
-                                backgroundColor: sorted.map(i => i[1] === 0 ? '#10b981' : (i[1] < 3 ? '#fbbf24' : '#ef4444')), 
-                                borderRadius: 6,
-                                barThickness: 'flex'
-                            }] 
-                        }, 
-                        options: { 
-                            responsive: true, 
-                            maintainAspectRatio: false, 
-                            plugins: { 
-                                legend: { display: false },
-                                tooltip: {
-                                    callbacks: {
-                                        label: function(context) {
-                                            return `แจ้งเหตุ: ${context.raw} ครั้ง`;
-                                        }
-                                    }
-                                }
-                            }, 
-                            scales: { 
-                                y: { beginAtZero: true, grid: { color: '#f3f4f6' } },
-                                x: { grid: { display: false } }
-                            } 
-                        } 
-                    }));
-
+                    this.state.reports.forEach(r => { if (stats[r.classLevel] !== undefined) stats[r.classLevel]++; else stats[r.classLevel] = (stats[r.classLevel] || 0) + 1; });
+                    const sorted = Object.entries(stats).sort((a,b) => a[1] - b[1]);
+                    this.state.chartInstances.push(new Chart(ctx, { type: 'bar', data: { labels: sorted.map(i => i[0]), datasets: [{ label: 'จำนวนครั้งที่ถูกแจ้งเหตุ', data: sorted.map(i => i[1]), backgroundColor: sorted.map(i => i[1] === 0 ? '#10b981' : (i[1] < 3 ? '#fbbf24' : '#ef4444')), borderRadius: 6, barThickness: 'flex' }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: function(context) { return `แจ้งเหตุ: ${context.raw} ครั้ง`; } } } }, scales: { y: { beginAtZero: true, grid: { color: '#f3f4f6' } }, x: { grid: { display: false } } } } }));
                 } else if (this.state.view === 'executive') {
-                    // 1. Trash Type Chart (Doughnut)
                     const trashCtx = document.getElementById('trashChart');
                     if (trashCtx) {
                         const trashStats = {};
                         this.state.reports.forEach(r => trashStats[r.trashType] = (trashStats[r.trashType] || 0) + 1);
-                        
-                        this.state.chartInstances.push(new Chart(trashCtx, { 
-                            type: 'doughnut', 
-                            data: { 
-                                labels: Object.keys(trashStats), 
-                                datasets: [{ 
-                                    data: Object.values(trashStats), 
-                                    backgroundColor: ['#34d399', '#fbbf24', '#60a5fa', '#f87171', '#a78bfa', '#9ca3af'],
-                                    borderWidth: 0
-                                }] 
-                            }, 
-                            options: { 
-                                responsive: true, 
-                                maintainAspectRatio: false, 
-                                plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } } },
-                                layout: { padding: 10 }
-                            } 
-                        }));
+                        this.state.chartInstances.push(new Chart(trashCtx, { type: 'doughnut', data: { labels: Object.keys(trashStats), datasets: [{ data: Object.values(trashStats), backgroundColor: ['#34d399', '#fbbf24', '#60a5fa', '#f87171', '#a78bfa', '#9ca3af'], borderWidth: 0 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } } }, layout: { padding: 10 } } }));
                     }
-
-                    // 2. Location Chart (Horizontal Bar)
                     const locCtx = document.getElementById('locationChart');
                     if (locCtx) {
                         const locStats = {};
                         this.state.reports.forEach(r => locStats[r.location] = (locStats[r.location] || 0) + 1);
-                        const sortedLocs = Object.entries(locStats).sort((a,b) => b[1] - a[1]).slice(0, 5); // Top 5
-                        
-                        this.state.chartInstances.push(new Chart(locCtx, { 
-                            type: 'bar', 
-                            data: { 
-                                labels: sortedLocs.map(i => i[0]), 
-                                datasets: [{ 
-                                    label: 'จำนวนครั้ง', 
-                                    data: sortedLocs.map(i => i[1]), 
-                                    backgroundColor: '#f59e0b',
-                                    borderRadius: 4
-                                }] 
-                            }, 
-                            options: { 
-                                responsive: true, 
-                                maintainAspectRatio: false, 
-                                indexAxis: 'y', 
-                                plugins: { legend: { display: false } },
-                                scales: { x: { beginAtZero: true, grid: { display: false } }, y: { grid: { display: false } } }
-                            } 
-                        }));
+                        const sortedLocs = Object.entries(locStats).sort((a,b) => b[1] - a[1]).slice(0, 5);
+                        this.state.chartInstances.push(new Chart(locCtx, { type: 'bar', data: { labels: sortedLocs.map(i => i[0]), datasets: [{ label: 'จำนวนครั้ง', data: sortedLocs.map(i => i[1]), backgroundColor: '#f59e0b', borderRadius: 4 }] }, options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, grid: { display: false } }, y: { grid: { display: false } } } } }));
                     }
-
-                    // 3. Trend Chart (Line)
                     const trendCtx = document.getElementById('trendChart');
                     if (trendCtx) {
                         const days = {};
                         for(let i=6; i>=0; i--) { 
                             const d = new Date(); 
                             d.setDate(d.getDate() - i); 
-                            // ใช้ key เป็นวันที่ไทย เพื่อให้ตรงกัน
-                            const key = d.toLocaleDateString('th-TH', {day: 'numeric', month: 'short', calendar: 'buddhist'});
+                            const key = this.formatThaiDate(d.toISOString(), 'short-no-year');
                             days[key] = 0; 
                         }
-                        
                         this.state.reports.forEach(r => { 
-                            const d = new Date(r.timestamp);
-                            const key = d.toLocaleDateString('th-TH', {day: 'numeric', month: 'short', calendar: 'buddhist'});
+                            const key = this.formatThaiDate(r.timestamp, 'short-no-year');
                             if (days[key] !== undefined) days[key]++; 
                         });
-
-                        this.state.chartInstances.push(new Chart(trendCtx, { 
-                            type: 'line', 
-                            data: { 
-                                labels: Object.keys(days), 
-                                datasets: [{ 
-                                    label: 'จำนวนการแจ้งเหตุ', 
-                                    data: Object.values(days), 
-                                    borderColor: '#10b981', 
-                                    tension: 0.4, 
-                                    fill: true, 
-                                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                                    pointBackgroundColor: '#ffffff',
-                                    pointBorderColor: '#10b981',
-                                    pointBorderWidth: 2
-                                }] 
-                            }, 
-                            options: { 
-                                responsive: true, 
-                                maintainAspectRatio: false, 
-                                plugins: { legend: { display: false } }, 
-                                scales: { 
-                                    y: { beginAtZero: true, suggestedMax: 5, grid: { borderDash: [2, 4] } },
-                                    x: { grid: { display: false } }
-                                } 
-                            } 
-                        }));
+                        this.state.chartInstances.push(new Chart(trendCtx, { type: 'line', data: { labels: Object.keys(days), datasets: [{ label: 'จำนวนการแจ้งเหตุ', data: Object.values(days), borderColor: '#10b981', tension: 0.4, fill: true, backgroundColor: 'rgba(16, 185, 129, 0.1)', pointBackgroundColor: '#ffffff', pointBorderColor: '#10b981', pointBorderWidth: 2 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, suggestedMax: 5, grid: { borderDash: [2, 4] } }, x: { grid: { display: false } } } } }));
                     }
                 }
             }
