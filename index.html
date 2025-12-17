@@ -88,7 +88,7 @@
         // **********************************************************
         // นำ URL ที่ได้จากการ Deploy Google Apps Script มาวางตรงนี้
         // **********************************************************
-        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzbY0B1aHZo_aIQG0Xla7J9vsZkJOvBUjUbpmPhBOx_r-fIYcJnunrPVd620WU-fo030g/exec"; 
+        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzncs8mb542GjwAZzcen76oNiXJIIS85VzIyERgX7D_DOKbMB4IDnbyk9ZK0OmYO9-O9w/exec"; 
 
         // --- Data Constants ---
         const DEFAULT_LOCATIONS = [
@@ -150,7 +150,7 @@
                 } catch (e) { alert("หน่วยความจำเต็ม ไม่สามารถบันทึกข้อมูลบางส่วนได้"); }
             },
 
-            // --- Google Sheets Sync Logic (New) ---
+            // --- Google Sheets Sync Logic ---
             async syncStudentsToCloud() {
                 if (!GOOGLE_SCRIPT_URL) return;
                 try {
@@ -214,13 +214,24 @@
                 } else {
                     reportToSave = { ...formData, id: Date.now(), timestamp: new Date().toISOString() };
                     
+                    // Logic: ให้คะแนนผู้แจ้ง +1
                     if (formData.reporterName) {
                         const rIdx = this.state.students.findIndex(s => s.name === formData.reporterName);
                         if (rIdx !== -1) {
                             this.state.students[rIdx].points = (this.state.students[rIdx].points || 0) + 1;
-                            this.syncStudentsToCloud(); // Sync points update
                         }
                     }
+
+                    // Logic: หักคะแนนผู้ถูกแจ้ง -1
+                    if (formData.name) {
+                        const oIdx = this.state.students.findIndex(s => s.name === formData.name);
+                        if (oIdx !== -1) {
+                            this.state.students[oIdx].points = (this.state.students[oIdx].points || 0) - 1;
+                        }
+                    }
+
+                    // Sync updated points to cloud immediately
+                    this.syncStudentsToCloud();
 
                     this.state.reports.unshift(reportToSave);
                     this.saveData();
@@ -236,7 +247,7 @@
                             });
                         } catch (error) { console.error("Error sending report:", error); }
                     }
-                    this.showNotification(`บันทึกสำเร็จ! ผู้แจ้งได้รับ +1 คะแนน`);
+                    this.showNotification(`บันทึกสำเร็จ! ผู้แจ้ง +1, ผู้ถูกแจ้ง -1`);
                 }
 
                 this.state.editingReportId = null;
