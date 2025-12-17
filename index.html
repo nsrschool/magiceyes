@@ -182,9 +182,6 @@
                 if (!url) return;
 
                 console.log("Syncing from cloud...");
-                // แสดงสถานะการโหลดเล็กน้อยที่มุมจอ (ถ้าต้องการ)
-                const notif = document.getElementById('notification');
-                const notifText = document.getElementById('notification-text');
                 
                 try {
                     const response = await fetch(url, {
@@ -227,13 +224,36 @@
                 }
             },
 
+            // [UPDATED] แก้ไขปัญหา LocalStorage เต็ม (Quota Exceeded)
             saveData() {
                 try {
+                    // 1. พยายามบันทึกข้อมูลปกติ (รวมรูปภาพ Base64)
                     localStorage.setItem('magicEyeReports', JSON.stringify(this.state.reports));
                     localStorage.setItem('magicEyeStudents', JSON.stringify(this.state.students));
                     localStorage.setItem('magicEyeConfig', JSON.stringify(this.state.config));
                 } catch (e) { 
-                    alert("หน่วยความจำเต็ม ไม่สามารถบันทึกข้อมูลบางส่วนลงในเครื่องได้"); 
+                    console.warn("LocalStorage full, trying to strip images...");
+                    try {
+                        // 2. ถ้าเต็ม ให้สร้างสำเนาข้อมูลโดยตัดรูปภาพออก (เพื่อลดขนาด)
+                        const reportsNoImg = this.state.reports.map(r => {
+                            const { image, ...rest } = r; // แยก image ออก
+                            return rest;
+                        });
+                        
+                        localStorage.setItem('magicEyeReports', JSON.stringify(reportsNoImg));
+                        localStorage.setItem('magicEyeStudents', JSON.stringify(this.state.students));
+                        localStorage.setItem('magicEyeConfig', JSON.stringify(this.state.config));
+                        
+                        // ไม่ Alert รบกวนผู้ใช้ แต่ Log ไว้
+                        console.log("Saved stripped data to LocalStorage successfully.");
+                    } catch (e2) {
+                        // 3. ถ้ายังเต็มอีก (ซึ่งยากมากถ้าไม่มีรูป) ถึงจะแจ้งเตือน
+                        console.error("Critical storage error:", e2);
+                        // แจ้งเตือนเฉพาะกรณีไม่ได้ต่อ Google Sheet เพราะถ้าต่อ Sheet ข้อมูลก็ยังปลอดภัย
+                        if (!this.state.config.scriptUrl) {
+                            this.showNotification("หน่วยความจำเครื่องเต็ม! ข้อมูลบางส่วนอาจไม่ถูกบันทึก");
+                        }
+                    }
                 }
             },
 
