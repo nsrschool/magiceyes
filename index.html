@@ -405,36 +405,44 @@
                         const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
                         
                         let count = 0;
-                        // Basic header detection (skip header row)
                         let startIndex = 0;
+                        // ตรวจสอบแถวหัวตาราง (หาคำว่า "ชั้น" หรือ "ชื่อ" ในแถวแรก)
                         if (jsonData[0] && jsonData[0].some(cell => typeof cell === 'string' && (cell.includes('ชื่อ') || cell.includes('ชั้น')))) { 
                             startIndex = 1; 
                         }
 
                         for (let i = startIndex; i < jsonData.length; i++) {
                             const row = jsonData[i];
-                            // Expecting roughly: [Class, No, Prefix, Name, Surname] or similar
-                            // Adapt this logic based on your specific Excel format
-                            if (row.length >= 2) { 
-                                // Simple Heuristic: look for name string
-                                const namePart = row.find(c => typeof c === 'string' && c.length > 2 && !c.includes('/'));
-                                const classPart = row.find(c => typeof c === 'string' && c.includes('/')) || row[0];
+                            // รูปแบบ: A=ชั้นเรียน, B=เลขที่, C=คำนำหน้า, D=ชื่อ, E=นามสกุล
+                            // Array Index: 0=A, 1=B, 2=C, 3=D, 4=E
+                            
+                            const classVal = row[0];          // คอลัมน์ A: ชั้นเรียน
+                            // const number = row[1];         // คอลัมน์ B: เลขที่ (ข้าม)
+                            const prefix = row[2] || '';      // คอลัมน์ C: คำนำหน้า
+                            const firstName = row[3];         // คอลัมน์ D: ชื่อ
+                            const lastName = row[4] || '';    // คอลัมน์ E: นามสกุล
+
+                            // ตรวจสอบว่าต้องมี ชั้นเรียน และ ชื่อ เป็นอย่างน้อย
+                            if (classVal && firstName) { 
+                                // รวมชื่อเต็ม: คำนำหน้า + ชื่อ + นามสกุล
+                                const fullName = `${prefix} ${firstName} ${lastName}`.trim().replace(/\s+/g, ' ');
                                 
-                                if (namePart) {
-                                    this.state.students.push({
-                                        id: Date.now().toString() + i,
-                                        name: namePart.trim(),
-                                        classLevel: classPart ? classPart.toString() : '-',
-                                        points: 0
-                                    });
-                                    count++;
-                                }
+                                this.state.students.push({
+                                    id: Date.now().toString() + i,
+                                    name: fullName,
+                                    classLevel: String(classVal).trim(),
+                                    points: 0
+                                });
+                                count++;
                             }
                         }
                         this.saveData();
                         this.syncStudentsToCloud();
                         this.showNotification(`นำเข้าสำเร็จ ${count} รายชื่อ`);
                         this.render();
+                        
+                        // รีเซ็ตช่องเลือกไฟล์
+                        e.target.value = '';
                     } catch (err) { alert("เกิดข้อผิดพลาดในการอ่านไฟล์ Excel: " + err.message); }
                 };
                 reader.readAsArrayBuffer(file);
@@ -1158,8 +1166,8 @@
                                     <i data-lucide="file-spreadsheet" class="mr-2 w-5 h-5 text-green-600"></i> นำเข้าไฟล์ Excel
                                 </h3>
                                 <p class="text-xs text-gray-500 mb-4 bg-gray-50 p-2.5 rounded border border-gray-100 leading-relaxed">
-                                    <strong>รูปแบบไฟล์:</strong> มีคอลัมน์ [ชั้น] และ [ชื่อ-สกุล] <br>
-                                    ระบบจะพยายามตรวจจับคอลัมน์อัตโนมัติ
+                                    <strong>รูปแบบไฟล์ (คอลัมน์):</strong> <br>
+                                    A=ชั้นเรียน, B=เลขที่, C=คำนำหน้า, D=ชื่อ, E=นามสกุล
                                 </p>
                                 <label class="block w-full text-center p-4 border-2 border-dashed border-emerald-200 rounded-xl cursor-pointer hover:bg-emerald-50 hover:border-emerald-400 transition-colors group">
                                     <i data-lucide="upload-cloud" class="w-8 h-8 text-emerald-300 mx-auto mb-2 group-hover:text-emerald-500 transition-colors"></i>
