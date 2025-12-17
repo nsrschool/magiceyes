@@ -176,6 +176,21 @@
                 this.syncFromCloud();
             },
 
+            // Helper to format Date to Thai Buddhist Era
+            formatThaiDate(isoString, options = {}) {
+                if (!isoString) return '-';
+                try {
+                    const date = new Date(isoString);
+                    // Force Buddhist calendar if supported, otherwise it might fallback
+                    return date.toLocaleDateString('th-TH', {
+                        ...options,
+                        calendar: 'buddhist'
+                    });
+                } catch (e) {
+                    return isoString;
+                }
+            },
+
             // [NEW] ฟังก์ชันดึงข้อมูลจาก Google Sheet มาทับข้อมูลในเครื่อง
             async syncFromCloud() {
                 const url = this.state.config.scriptUrl;
@@ -588,7 +603,7 @@
                 
                 const recentRows = this.state.reports.slice(0, 5).map(r => `
                     <tr class="hover:bg-gray-50 border-b last:border-0 transition-colors">
-                        <td class="p-4 text-gray-500 text-xs whitespace-nowrap">${new Date(r.timestamp).toLocaleDateString('th-TH', {day: 'numeric', month: 'short'})}</td>
+                        <td class="p-4 text-gray-500 text-xs whitespace-nowrap">${this.formatThaiDate(r.timestamp, {day: 'numeric', month: 'short', year: '2-digit'})}</td>
                         <td class="p-4 text-gray-800 text-sm font-medium">${r.location}</td>
                         <td class="p-4 text-gray-600 text-sm">${r.trashType}</td>
                         <td class="p-4"><span class="bg-emerald-100 text-emerald-800 px-2 py-1 rounded-full text-xs font-bold">${r.classLevel}</span></td>
@@ -896,7 +911,7 @@
                     // Group by Date
                     const grouped = {};
                     filtered.forEach(r => {
-                        const dateKey = new Date(r.timestamp).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
+                        const dateKey = this.formatThaiDate(r.timestamp, { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
                         if (!grouped[dateKey]) grouped[dateKey] = [];
                         grouped[dateKey].push(r);
                     });
@@ -1057,13 +1072,14 @@
 
                         <!-- KPI Cards -->
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
+                            <!-- [UPDATED] Card 1: Total Reports (Matches List) -->
                             <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
                                 <div class="flex justify-between items-start mb-2">
-                                    <p class="text-sm text-gray-500 font-medium">แจ้งเหตุวันนี้</p>
-                                    <span class="p-1.5 bg-blue-100 rounded-lg"><i data-lucide="calendar-days" class="w-4 h-4 text-blue-600"></i></span>
+                                    <p class="text-sm text-gray-500 font-medium">ยอดแจ้งเหตุสะสม</p>
+                                    <span class="p-1.5 bg-blue-100 rounded-lg"><i data-lucide="folder-open" class="w-4 h-4 text-blue-600"></i></span>
                                 </div>
-                                <p class="text-4xl font-bold text-blue-600">${todayCount}</p>
-                                <p class="text-xs text-gray-400 mt-2">จากทั้งหมด ${total} ครั้งในเทอมนี้</p>
+                                <p class="text-4xl font-bold text-emerald-600">${total}</p>
+                                <p class="text-xs text-gray-400 mt-2">วันนี้ ${todayCount} ครั้ง</p>
                             </div>
 
                             <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
@@ -1077,7 +1093,7 @@
 
                             <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
                                 <div class="flex justify-between items-start mb-2">
-                                    <p class="text-sm text-gray-500 font-medium">สถานะภาพรวม</p>
+                                    <p class="text-sm text-gray-500 font-medium">สถานะภาพรวม (วันนี้)</p>
                                     <span class="p-1.5 bg-green-100 rounded-lg"><i data-lucide="activity" class="w-4 h-4 text-green-600"></i></span>
                                 </div>
                                 <p class="text-lg font-bold ${todayCount > 5 ? 'text-red-500' : 'text-emerald-500'}">
@@ -1431,11 +1447,14 @@
                         for(let i=6; i>=0; i--) { 
                             const d = new Date(); 
                             d.setDate(d.getDate() - i); 
-                            days[d.toLocaleDateString('th-TH', {day: 'numeric', month: 'short'})] = 0; 
+                            // ใช้ key เป็นวันที่ไทย เพื่อให้ตรงกัน
+                            const key = d.toLocaleDateString('th-TH', {day: 'numeric', month: 'short', calendar: 'buddhist'});
+                            days[key] = 0; 
                         }
                         
                         this.state.reports.forEach(r => { 
-                            const key = new Date(r.timestamp).toLocaleDateString('th-TH', {day: 'numeric', month: 'short'}); 
+                            const d = new Date(r.timestamp);
+                            const key = d.toLocaleDateString('th-TH', {day: 'numeric', month: 'short', calendar: 'buddhist'});
                             if (days[key] !== undefined) days[key]++; 
                         });
 
