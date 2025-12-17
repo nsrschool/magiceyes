@@ -147,7 +147,7 @@
             },
 
             init() {
-                // Load Data from LocalStorage
+                // Load Data from LocalStorage (โหลดข้อมูลเก่ามาแสดงก่อน เพื่อความเร็ว)
                 const savedReports = localStorage.getItem('magicEyeReports');
                 this.state.reports = savedReports ? JSON.parse(savedReports) : INITIAL_REPORTS;
 
@@ -162,7 +162,6 @@
                     scriptUrl: ""
                 };
                 
-                // Use global constant if config is empty but code has URL
                 if (!this.state.config.scriptUrl && GOOGLE_SCRIPT_URL) {
                     this.state.config.scriptUrl = GOOGLE_SCRIPT_URL;
                 }
@@ -172,6 +171,60 @@
                 
                 // Initialize Lucide Icons
                 lucide.createIcons();
+
+                // [NEW] ดึงข้อมูลล่าสุดจาก Cloud ทันทีที่เปิดแอพ
+                this.syncFromCloud();
+            },
+
+            // [NEW] ฟังก์ชันดึงข้อมูลจาก Google Sheet มาทับข้อมูลในเครื่อง
+            async syncFromCloud() {
+                const url = this.state.config.scriptUrl;
+                if (!url) return;
+
+                console.log("Syncing from cloud...");
+                // แสดงสถานะการโหลดเล็กน้อยที่มุมจอ (ถ้าต้องการ)
+                const notif = document.getElementById('notification');
+                const notifText = document.getElementById('notification-text');
+                
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        mode: 'cors', // เปลี่ยนเป็น cors เพื่อให้อ่าน response ได้ (ต้อง Deploy Web App เป็น "Anyone" / "ทุกคน")
+                        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                        body: JSON.stringify({ action: 'get_all_data' })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.result === 'success') {
+                        // อัปเดตข้อมูลในแอพด้วยข้อมูลจาก Cloud
+                        // ยึด Cloud เป็นหลัก: ถ้าใน Sheet ลบ -> ใน App ก็จะหายไป
+                        
+                        // แปลงข้อมูล Reports
+                        if (result.reports) {
+                            // แปลง timestamp กลับเป็น ISO String ถ้าจำเป็น หรือใช้ format จาก Sheet
+                            this.state.reports = result.reports.map(r => ({
+                                ...r,
+                                // แปลงวันที่ถ้าจำเป็น (Google Sheet ส่งมาเป็น String)
+                                // แต่เราเก็บเป็น String อยู่แล้วใน flow นี้
+                            }));
+                            // เรียงลำดับตามเวลาใหม่สุด
+                            this.state.reports.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                        }
+                        
+                        // แปลงข้อมูล Students
+                        if (result.students) {
+                            this.state.students = result.students;
+                        }
+
+                        this.saveData(); // บันทึกลงเครื่อง
+                        this.render();   // แสดงผลใหม่
+                        console.log("Cloud sync complete.");
+                    }
+                } catch (error) {
+                    console.error("Cloud sync failed:", error);
+                    // ถ้า Sync ไม่ได้ (เช่น ไม่มีเน็ต) ก็จะใช้ข้อมูลเดิมใน LocalStorage ต่อไป
+                }
             },
 
             saveData() {
