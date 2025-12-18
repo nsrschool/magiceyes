@@ -176,13 +176,13 @@
                 this.syncFromCloud();
             },
 
-            // [FIXED] Manual Format to prevent double addition of BE year (3111)
+            // [FIXED] Format Date to Christian Era (ค.ศ.)
             formatThaiDate(isoString, type = 'short') {
                 if (!isoString) return '-';
                 const date = new Date(isoString);
                 
                 const day = date.getDate();
-                const year = date.getFullYear() + 543;
+                const year = date.getFullYear(); // No +543 for Christian Year
                 
                 if (type === 'full') {
                     const months = [
@@ -194,7 +194,7 @@
                     ];
                     const month = months[date.getMonth()];
                     const dayName = days[date.getDay()];
-                    return `${dayName}ที่ ${day} ${month} พ.ศ. ${year}`;
+                    return `${dayName}ที่ ${day} ${month} ค.ศ. ${year}`;
                 } else if (type === 'short-no-year') {
                      const months = [
                         "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
